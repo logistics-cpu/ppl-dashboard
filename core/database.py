@@ -160,7 +160,13 @@ def upsert_weekly_sales(style, color, size, week_start, week_end, units_sold, so
                 WHERE style=? AND color=? AND size=? AND week_start=?
             """, (style, color, size, week_start)).fetchone()
             if existing and existing["source"] == "spreadsheet":
-                return  # Protect spreadsheet data
+                # Allow Shopify to overwrite spreadsheet records with 0 units
+                existing_units = conn.execute("""
+                    SELECT units_sold FROM weekly_sales
+                    WHERE style=? AND color=? AND size=? AND week_start=?
+                """, (style, color, size, week_start)).fetchone()
+                if existing_units and existing_units["units_sold"] > 0:
+                    return  # Protect non-zero spreadsheet data
 
         conn.execute("""
             INSERT INTO weekly_sales (style, color, size, week_start, week_end, units_sold, source)
