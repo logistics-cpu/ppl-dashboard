@@ -32,7 +32,7 @@ _use_turso = bool(_turso_url and _turso_token)
 
 if _use_turso:
     try:
-        import libsql_experimental as libsql
+        import libsql_client
         _turso_available = True
     except ImportError:
         _turso_available = False
@@ -64,46 +64,19 @@ class _DictRow:
         return self._data.get(key, default)
 
 
-class _TursoCursorWrapper:
-    """Wraps libsql cursor to return _DictRow objects like sqlite3.Row."""
-    def __init__(self, cursor):
-        self._cursor = cursor
-        self._description = None
-
-    def execute(self, sql, params=()):
-        result = self._cursor.execute(sql, params)
-        self._description = self._cursor.description
-        return self
-
-    def fetchone(self):
-        row = self._cursor.fetchone()
-        if row is None or self._description is None:
-            return None
-        keys = [d[0] for d in self._description]
-        return _DictRow(keys, row)
-
-    def fetchall(self):
-        rows = self._cursor.fetchall()
-        if not rows or self._description is None:
-            return []
-        keys = [d[0] for d in self._description]
-        return [_DictRow(keys, row) for row in rows]
-
-
 class _TursoConnWrapper:
-    """Wraps libsql connection to behave like sqlite3.Connection with row_factory."""
-    def __init__(self, conn):
-        self._conn = conn
+    """Wraps libsql_client sync client to behave like sqlite3.Connection."""
+    def __init__(self, client):
+        self._client = client
 
     def execute(self, sql, params=()):
-        cursor = self._conn.cursor()
-        wrapper = _TursoCursorWrapper(cursor)
-        return wrapper.execute(sql, params)
+        # Convert ? placeholders to positional args for libsql_client
+        result = self._client.execute(sql, list(params))
+        return _TursoResultWrapper(result)
 
     def executemany(self, sql, params_list):
-        cursor = self._conn.cursor()
         for params in params_list:
-            cursor.execute(sql, params)
+            self._client.execute(sql, list(params))
 
     def executescript(self, sql):
         # Split on semicolons and execute each statement
@@ -111,35 +84,55 @@ class _TursoConnWrapper:
             stmt = stmt.strip()
             if stmt:
                 try:
-                    self._conn.execute(stmt)
+                    self._client.execute(stmt)
                 except Exception:
                     pass  # Skip empty or comment-only statements
 
     def commit(self):
-        self._conn.commit()
+        pass  # Turso auto-commits
 
     def close(self):
-        pass  # Turso connections are persistent, don't close
-
-    def sync(self):
-        if hasattr(self._conn, 'sync'):
-            self._conn.sync()
+        pass  # Reuse connection
 
 
-# Singleton Turso connection
-_turso_conn = None
+class _TursoResultWrapper:
+    """Wraps libsql_client result to provide fetchone/fetchall with dict rows."""
+    def __init__(self, result):
+        self._columns = result.columns if hasattr(result, 'columns') else []
+        self._rows = result.rows if hasattr(result, 'rows') else []
+        self._idx = 0
+
+    def fetchone(self):
+        if self._idx >= len(self._rows):
+            return None
+        row = self._rows[self._idx]
+        self._idx += 1
+        if self._columns:
+            return _DictRow(self._columns, row)
+        return row
+
+    def fetchall(self):
+        rows = self._rows[self._idx:]
+        self._idx = len(self._rows)
+        if self._columns:
+            return [_DictRow(self._columns, row) for row in rows]
+        return rows
+
+
+# Singleton Turso client
+_turso_client = None
 
 
 def _get_turso_conn():
-    global _turso_conn
-    if _turso_conn is None:
-        _turso_conn = libsql.connect(
-            "local_replica.db",
-            sync_url=_turso_url,
+    global _turso_client
+    if _turso_client is None:
+        # Convert libsql:// to https:// for HTTP client
+        url = _turso_url.replace("libsql://", "https://")
+        _turso_client = libsql_client.create_client_sync(
+            url=url,
             auth_token=_turso_token,
         )
-        _turso_conn.sync()
-    return _TursoConnWrapper(_turso_conn)
+    return _TursoConnWrapper(_turso_client)
 
 
 @contextmanager
@@ -148,9 +141,6 @@ def get_db():
         conn = _get_turso_conn()
         try:
             yield conn
-            conn.commit()
-            # Sync changes to Turso cloud
-            conn.sync()
         except Exception:
             raise
     else:
