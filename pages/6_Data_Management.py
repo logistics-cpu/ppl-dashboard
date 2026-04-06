@@ -260,7 +260,7 @@ with tab_shopify:
             import re
             from core.config import SIZES, COLORS
 
-            STYLE_TAB_MAP = {"Long": "Long", "7/8": "7/8", "Short": "Short"}
+            STYLE_TAB_MAP = {"Long": "Long", "7/8": "7/8", "78": "7/8", "Short": "Short"}
             COLOR_MAP_SHEET = {"Black": "Black", "Olive Green": "Olive Green", "Burgundy": "Burgundy"}
 
             all_rows = []
