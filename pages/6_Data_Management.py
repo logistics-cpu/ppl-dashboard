@@ -238,31 +238,153 @@ with tab_shopify:
 
     st.markdown("---")
 
-    # CSV fallback
+    # Spreadsheet sales import
     st.markdown("""
     <div class="dm-section">
-        <div class="dm-section-title">CSV Import (Fallback)</div>
+        <div class="dm-section-title">Spreadsheet Sales Import</div>
         <div class="dm-section-desc">
-            If the Shopify API is unavailable, upload a sales export CSV manually.
+            Upload your PPL Sales & Forecasting Excel file to import historical weekly sales data.
+            The file should have tabs named Long, 7/8, and Short with "Week Date" and "Units Sold" columns.
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-    csv_file = st.file_uploader(
-        "Upload CSV",
-        type=["csv"],
-        key="csv_upload",
-        help="Accepted format: Shopify sales export (.csv).",
+    sales_file = st.file_uploader(
+        "Upload Sales Excel (.xlsx)",
+        type=["xlsx"],
+        key="sales_xlsx_upload",
+        help="PPL Scaling Sales & Forecasting spreadsheet.",
     )
-    if csv_file:
+    if sales_file:
         try:
-            df = pd.read_csv(csv_file)
-            st.markdown('<div class="table-container">', unsafe_allow_html=True)
-            st.dataframe(df.head(10), use_container_width=True, hide_index=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-            st.info(f"Found **{len(df)}** rows. CSV import processing coming soon.")
+            import re
+            from core.config import SIZES, COLORS
+
+            STYLE_TAB_MAP = {"Long": "Long", "7/8": "7/8", "Short": "Short"}
+            COLOR_MAP_SHEET = {"Black": "Black", "Olive Green": "Olive Green", "Burgundy": "Burgundy"}
+
+            all_rows = []
+            xls = pd.ExcelFile(sales_file)
+
+            for sheet_name in xls.sheet_names:
+                # Match style from sheet name
+                style = None
+                for key, val in STYLE_TAB_MAP.items():
+                    if key.lower() in sheet_name.lower():
+                        style = val
+                        break
+                if not style:
+                    continue
+
+                df = pd.read_excel(xls, sheet_name=sheet_name, header=None)
+
+                # Find the header row with "Week Date" and "Units Sold"
+                header_row = None
+                for i in range(min(20, len(df))):
+                    row_vals = [str(v).strip() for v in df.iloc[i].values]
+                    if any("week date" in v.lower() for v in row_vals) and any("units sold" in v.lower() for v in row_vals):
+                        header_row = i
+                        break
+
+                if header_row is None:
+                    continue
+
+                # Set header and get data rows
+                df.columns = [str(v).strip() for v in df.iloc[header_row].values]
+                df = df.iloc[header_row + 1:].reset_index(drop=True)
+
+                # Find columns
+                week_col = None
+                units_col = None
+                size_col = None
+                for c in df.columns:
+                    cl = c.lower()
+                    if "week date" in cl:
+                        week_col = c
+                    elif "units sold" in cl:
+                        units_col = c
+                    elif cl == "size":
+                        size_col = c
+
+                if not week_col or not units_col:
+                    continue
+
+                # Detect color from sheet name
+                color = "Black"  # default
+                for c_name in ["Olive Green", "Burgundy", "Green", "Red"]:
+                    if c_name.lower() in sheet_name.lower():
+                        color = "Olive Green" if "green" in c_name.lower() else "Burgundy"
+                        break
+
+                # Parse rows
+                current_size = None
+                for _, row in df.iterrows():
+                    # Check if there's a size column or detect from data
+                    if size_col and pd.notna(row.get(size_col)):
+                        sz = str(row[size_col]).strip()
+                        if sz in SIZES:
+                            current_size = sz
+
+                    week_val = str(row.get(week_col, "")).strip()
+                    units_val = row.get(units_col)
+
+                    if not week_val or week_val == "nan" or not current_size:
+                        continue
+
+                    # Parse week date like "12/16-12/22" or "3/10-3/16"
+                    m = re.match(r"(\d{1,2})/(\d{1,2})\s*-\s*(\d{1,2})/(\d{1,2})", week_val)
+                    if not m:
+                        continue
+
+                    try:
+                        units = int(float(units_val)) if pd.notna(units_val) else 0
+                    except (ValueError, TypeError):
+                        continue
+
+                    sm, sd, em, ed = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+                    # Determine year
+                    year = 2026  # current year
+                    if sm == 12 and em == 12:
+                        year_start, year_end = 2025, 2025
+                    elif sm == 12:
+                        year_start, year_end = 2025, 2026
+                    else:
+                        year_start, year_end = 2026, 2026
+
+                    week_start = f"{year_start}-{sm:02d}-{sd:02d}"
+                    week_end = f"{year_end}-{em:02d}-{ed:02d}"
+
+                    all_rows.append({
+                        "style": style,
+                        "color": color,
+                        "size": current_size,
+                        "week_start": week_start,
+                        "week_end": week_end,
+                        "units_sold": units,
+                    })
+
+            if all_rows:
+                preview_df = pd.DataFrame(all_rows)
+                st.success(f"Parsed **{len(all_rows)}** sales records from {len(set(r['style'] for r in all_rows))} style tabs.")
+                st.dataframe(preview_df.head(20), use_container_width=True, hide_index=True)
+
+                if st.button("Import Sales Data", type="primary", key="import_sales_xlsx"):
+                    count = 0
+                    for r in all_rows:
+                        upsert_weekly_sales(
+                            r["style"], r["color"], r["size"],
+                            r["week_start"], r["week_end"],
+                            r["units_sold"], source="spreadsheet",
+                        )
+                        count += 1
+                    log_sync("spreadsheet_sales", "success", count)
+                    st.success(f"Imported **{count}** weekly sales records from spreadsheet.")
+                    st.rerun()
+            else:
+                st.warning("Could not find any sales data in the uploaded file. Make sure it has tabs named Long, 7/8, or Short with 'Week Date' and 'Units Sold' columns.")
+
         except Exception as e:
-            st.error(f"Error reading CSV: {e}")
+            st.error(f"Error reading spreadsheet: {e}")
 
 # ─── ERP Upload ───────────────────────────────────────────────────────────
 with tab_erp:
