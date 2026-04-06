@@ -65,4 +65,6 @@ DEFAULT_STOCKOUT_THRESHOLD_DAYS = 14
 DEFAULT_WARNING_THRESHOLD_DAYS = 30
 
 # Database
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "ppl_dashboard.db")
+_data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+os.makedirs(_data_dir, exist_ok=True)
+DB_PATH = os.path.join(_data_dir, "ppl_dashboard.db")
