@@ -336,14 +336,16 @@ with tab_shopify:
                     if not m:
                         continue
 
+                    # Skip rows with no units sold (nan/empty)
+                    if not pd.notna(units_val):
+                        continue
                     try:
-                        units = int(float(units_val)) if pd.notna(units_val) else 0
+                        units = int(float(units_val))
                     except (ValueError, TypeError):
                         continue
 
                     sm, sd, em, ed = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
                     # Determine year
-                    year = 2026  # current year
                     if sm == 12 and em == 12:
                         year_start, year_end = 2025, 2025
                     elif sm == 12:
@@ -353,6 +355,11 @@ with tab_shopify:
 
                     week_start = f"{year_start}-{sm:02d}-{sd:02d}"
                     week_end = f"{year_end}-{em:02d}-{ed:02d}"
+
+                    # Skip future weeks
+                    from datetime import date as _date
+                    if week_start > _date.today().isoformat():
+                        continue
 
                     all_rows.append({
                         "style": style,
