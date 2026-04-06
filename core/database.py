@@ -1,23 +1,173 @@
-"""SQLite database schema and CRUD operations."""
+"""Database schema and CRUD operations — uses Turso (libsql) when configured, else local SQLite."""
 
 import sqlite3
 from datetime import datetime
 from contextlib import contextmanager
 from core.config import DB_PATH, STYLES, COLORS, SIZES
 
+# ---------------------------------------------------------------------------
+# Connection layer — Turso cloud or local SQLite
+# ---------------------------------------------------------------------------
+
+def _get_turso_config():
+    """Return (url, token) from Streamlit secrets or env vars, or (None, None)."""
+    try:
+        import streamlit as st
+        url = st.secrets.get("TURSO_DB_URL", "")
+        token = st.secrets.get("TURSO_AUTH_TOKEN", "")
+        if url and token:
+            return url, token
+    except Exception:
+        pass
+    import os
+    url = os.getenv("TURSO_DB_URL", "")
+    token = os.getenv("TURSO_AUTH_TOKEN", "")
+    if url and token:
+        return url, token
+    return None, None
+
+
+_turso_url, _turso_token = _get_turso_config()
+_use_turso = bool(_turso_url and _turso_token)
+
+if _use_turso:
+    try:
+        import libsql_experimental as libsql
+        _turso_available = True
+    except ImportError:
+        _turso_available = False
+        _use_turso = False
+else:
+    _turso_available = False
+
+
+class _DictRow:
+    """Lightweight dict-like row that works like sqlite3.Row."""
+    def __init__(self, keys, values):
+        self._data = dict(zip(keys, values))
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return list(self._data.values())[key]
+        return self._data[key]
+
+    def keys(self):
+        return self._data.keys()
+
+    def values(self):
+        return self._data.values()
+
+    def items(self):
+        return self._data.items()
+
+    def get(self, key, default=None):
+        return self._data.get(key, default)
+
+
+class _TursoCursorWrapper:
+    """Wraps libsql cursor to return _DictRow objects like sqlite3.Row."""
+    def __init__(self, cursor):
+        self._cursor = cursor
+        self._description = None
+
+    def execute(self, sql, params=()):
+        result = self._cursor.execute(sql, params)
+        self._description = self._cursor.description
+        return self
+
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        if row is None or self._description is None:
+            return None
+        keys = [d[0] for d in self._description]
+        return _DictRow(keys, row)
+
+    def fetchall(self):
+        rows = self._cursor.fetchall()
+        if not rows or self._description is None:
+            return []
+        keys = [d[0] for d in self._description]
+        return [_DictRow(keys, row) for row in rows]
+
+
+class _TursoConnWrapper:
+    """Wraps libsql connection to behave like sqlite3.Connection with row_factory."""
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql, params=()):
+        cursor = self._conn.cursor()
+        wrapper = _TursoCursorWrapper(cursor)
+        return wrapper.execute(sql, params)
+
+    def executemany(self, sql, params_list):
+        cursor = self._conn.cursor()
+        for params in params_list:
+            cursor.execute(sql, params)
+
+    def executescript(self, sql):
+        # Split on semicolons and execute each statement
+        for stmt in sql.split(';'):
+            stmt = stmt.strip()
+            if stmt:
+                try:
+                    self._conn.execute(stmt)
+                except Exception:
+                    pass  # Skip empty or comment-only statements
+
+    def commit(self):
+        self._conn.commit()
+
+    def close(self):
+        pass  # Turso connections are persistent, don't close
+
+    def sync(self):
+        if hasattr(self._conn, 'sync'):
+            self._conn.sync()
+
+
+# Singleton Turso connection
+_turso_conn = None
+
+
+def _get_turso_conn():
+    global _turso_conn
+    if _turso_conn is None:
+        _turso_conn = libsql.connect(
+            "local_replica.db",
+            sync_url=_turso_url,
+            auth_token=_turso_token,
+        )
+        _turso_conn.sync()
+    return _TursoConnWrapper(_turso_conn)
+
 
 @contextmanager
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+    if _use_turso:
+        conn = _get_turso_conn()
+        try:
+            yield conn
+            conn.commit()
+            # Sync changes to Turso cloud
+            conn.sync()
+        except Exception:
+            raise
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
 
+
+# ---------------------------------------------------------------------------
+# Schema init
+# ---------------------------------------------------------------------------
 
 def init_db():
     with get_db() as conn:
