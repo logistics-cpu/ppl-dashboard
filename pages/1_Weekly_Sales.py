@@ -156,7 +156,8 @@ def filter_sales_by_period(sales_list):
         num_weeks = int(sel_period.split()[1])
         cutoff = today - timedelta(weeks=num_weeks)
         cutoff_str = cutoff.strftime("%Y-%m-%d")
-        return [r for r in sales_list if str(r["week_start"]) >= cutoff_str]
+        today_str = today.strftime("%Y-%m-%d")
+        return [r for r in sales_list if cutoff_str <= str(r["week_start"]) <= today_str]
 
     # Month filter (e.g. "March 2026")
     try:
