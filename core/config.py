@@ -5,10 +5,23 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _get_config(key, default=""):
+    """Read from Streamlit secrets first, then fall back to env vars."""
+    try:
+        import streamlit as st
+        val = st.secrets.get(key, "")
+        if val:
+            return val
+    except Exception:
+        pass
+    return os.getenv(key, default)
+
+
 # Shopify API
-SHOPIFY_STORE_URL = os.getenv("SHOPIFY_STORE_URL", "")
-SHOPIFY_ACCESS_TOKEN = os.getenv("SHOPIFY_ACCESS_TOKEN", "")
-SHOPIFY_API_VERSION = os.getenv("SHOPIFY_API_VERSION", "2025-10")
+SHOPIFY_STORE_URL = _get_config("SHOPIFY_STORE_URL")
+SHOPIFY_ACCESS_TOKEN = _get_config("SHOPIFY_ACCESS_TOKEN")
+SHOPIFY_API_VERSION = _get_config("SHOPIFY_API_VERSION", "2025-10")
 
 # Product matrix
 STYLES = ["Long", "7/8", "Short"]
