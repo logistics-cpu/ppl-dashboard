@@ -266,6 +266,15 @@ with tab_shopify:
             all_rows = []
             xls = pd.ExcelFile(sales_file)
 
+            # Known color headers in the spreadsheet
+            COLOR_HEADERS = {
+                "black": "Black",
+                "olive green": "Olive Green",
+                "burgundy": "Burgundy",
+                "green": "Olive Green",
+                "red": "Burgundy",
+            }
+
             for sheet_name in xls.sheet_names:
                 # Match style from sheet name
                 style = None
@@ -278,57 +287,58 @@ with tab_shopify:
 
                 df = pd.read_excel(xls, sheet_name=sheet_name, header=None)
 
-                # Find the header row with "Week Date" and "Units Sold"
-                header_row = None
-                for i in range(min(20, len(df))):
-                    row_vals = [str(v).strip() for v in df.iloc[i].values]
-                    if any("week date" in v.lower() for v in row_vals) and any("units sold" in v.lower() for v in row_vals):
-                        header_row = i
-                        break
-
-                if header_row is None:
-                    continue
-
-                # Set header and get data rows
-                df.columns = [str(v).strip() for v in df.iloc[header_row].values]
-                df = df.iloc[header_row + 1:].reset_index(drop=True)
-
-                # Find columns
+                # Parse the sheet row by row, handling:
+                # - Color header rows (e.g., "BLACK", "OLIVE GREEN")
+                # - Repeated column header rows (Size, Week, ...)
+                # - Data rows with size, week date, units sold
+                current_color = "Black"  # default
+                current_size = None
                 week_col = None
                 units_col = None
                 size_col = None
-                for c in df.columns:
-                    cl = c.lower()
-                    if "week date" in cl:
-                        week_col = c
-                    elif "units sold" in cl:
-                        units_col = c
-                    elif cl == "size":
-                        size_col = c
 
-                if not week_col or not units_col:
-                    continue
+                for i in range(len(df)):
+                    row_vals = df.iloc[i].values
+                    first_val = str(row_vals[0]).strip() if pd.notna(row_vals[0]) else ""
 
-                # Detect color from sheet name
-                color = "Black"  # default
-                for c_name in ["Olive Green", "Burgundy", "Green", "Red"]:
-                    if c_name.lower() in sheet_name.lower():
-                        color = "Olive Green" if "green" in c_name.lower() else "Burgundy"
-                        break
+                    # Check for color header row (e.g., "BLACK", "OLIVE GREEN")
+                    if first_val.lower() in COLOR_HEADERS:
+                        current_color = COLOR_HEADERS[first_val.lower()]
+                        continue
 
-                # Parse rows
-                current_size = None
-                for _, row in df.iterrows():
-                    # Check if there's a size column or detect from data
-                    if size_col and pd.notna(row.get(size_col)):
-                        sz = str(row[size_col]).strip()
+                    # Check for column header row (contains "Week Date" and "Units Sold")
+                    str_vals = [str(v).strip().lower() for v in row_vals]
+                    if any("week date" in v for v in str_vals) and any("units sold" in v for v in str_vals):
+                        # Re-detect column positions for this section
+                        week_col = None
+                        units_col = None
+                        size_col = None
+                        for j, v in enumerate(str_vals):
+                            if "week date" in v:
+                                week_col = j
+                            elif "units sold" in v:
+                                units_col = j
+                            elif v == "size":
+                                size_col = j
+                        continue
+
+                    if week_col is None or units_col is None:
+                        continue
+
+                    # Check for size value
+                    if size_col is not None and pd.notna(row_vals[size_col]):
+                        sz = str(row_vals[size_col]).strip()
                         if sz in SIZES:
                             current_size = sz
 
-                    week_val = str(row.get(week_col, "")).strip()
-                    units_val = row.get(units_col)
+                    if not current_size:
+                        continue
 
-                    if not week_val or week_val == "nan" or not current_size:
+                    # Get week date and units
+                    week_val = str(row_vals[week_col]).strip() if pd.notna(row_vals[week_col]) else ""
+                    units_val = row_vals[units_col]
+
+                    if not week_val or week_val == "nan":
                         continue
 
                     # Parse week date like "12/16-12/22" or "3/10-3/16"
@@ -363,7 +373,7 @@ with tab_shopify:
 
                     all_rows.append({
                         "style": style,
-                        "color": color,
+                        "color": current_color,
                         "size": current_size,
                         "week_start": week_start,
                         "week_end": week_end,
