@@ -65,20 +65,24 @@ if "fc_weeks" not in st.session_state:
     st.session_state["fc_weeks"] = int(get_setting("fc_weeks", "8"))
 if "fc_growth_mode" not in st.session_state:
     st.session_state["fc_growth_mode"] = get_setting("fc_growth_mode", "Auto (weighted average)")
-if "fc_custom_growth" not in st.session_state:
-    st.session_state["fc_custom_growth"] = float(get_setting("fc_custom_growth", "5.0"))
 if "fc_demand_basis" not in st.session_state:
     st.session_state["fc_demand_basis"] = get_setting("fc_demand_basis", "Last week")
 if "fc_color" not in st.session_state:
     st.session_state["fc_color"] = "All"
+
+# Shadow key for custom growth — Streamlit clears widget keys when widgets are
+# not rendered, so we keep a separate key that only WE control.
+if "_fc_custom_growth_saved" not in st.session_state:
+    st.session_state["_fc_custom_growth_saved"] = float(get_setting("fc_custom_growth", "5.0"))
 
 
 def _save_fc_settings():
     """Save forecast settings to database on any change."""
     set_setting("fc_weeks", st.session_state.get("fc_weeks", 8))
     set_setting("fc_growth_mode", st.session_state.get("fc_growth_mode", "Auto (weighted average)"))
-    # Only save custom growth if it's actually in session_state (widget rendered)
+    # Sync custom growth: widget → shadow → DB
     if "fc_custom_growth" in st.session_state:
+        st.session_state["_fc_custom_growth_saved"] = st.session_state["fc_custom_growth"]
         set_setting("fc_custom_growth", st.session_state["fc_custom_growth"])
     set_setting("fc_demand_basis", st.session_state.get("fc_demand_basis", "Last week"))
 
@@ -103,6 +107,9 @@ with c2:
 
 with c3:
     if growth_mode == "Custom %":
+        # Restore saved value into widget key before rendering
+        if "fc_custom_growth" not in st.session_state:
+            st.session_state["fc_custom_growth"] = st.session_state["_fc_custom_growth_saved"]
         custom_growth = st.number_input(
             "Weekly growth %", -50.0, 200.0, step=1.0,
             key="fc_custom_growth",
@@ -110,10 +117,6 @@ with c3:
         ) / 100
     else:
         custom_growth = 0.0
-        # Preserve custom growth value even when widget isn't rendered
-        # so it's still there when user switches back to Custom %
-        if "fc_custom_growth" not in st.session_state:
-            st.session_state["fc_custom_growth"] = float(get_setting("fc_custom_growth", "5.0"))
         st.empty()
 
 with c4:
