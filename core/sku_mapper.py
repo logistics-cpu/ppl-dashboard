@@ -11,12 +11,10 @@ def parse_shopify_sku(sku):
     """
     Parse a Shopify SKU string into (style, color, size).
 
-    Supported formats:
+    Supported formats (PPL only — excludes maternity legging SKUs):
       108731-pplegging-full-black-newlogo-M       → (Long, Black, M)
       108731-pplegging-7/8s-green-newlogo-L       → (7/8, Olive Green, L)
       108731-pplegging-short-red-newlogo-S         → (Short, Burgundy, S)
-      108731-legging-black-M                       → (Long, Black, M)
-      108731-legging-short-black-newlogo-XL        → (Short, Black, XL)
       108731-Newblack-highshort-XS                 → (Short, Black, XS)
       108731-Newblack-high-M                       → (Long, Black, M)
       108731-Newblack-high7-L                      → (7/8, Black, L)
@@ -37,23 +35,7 @@ def parse_shopify_sku(sku):
         if style and color and size_code in SIZES:
             return (style, color, size_code)
 
-    # Pattern 2: 108731-legging-short-{color}-newlogo-{size}  (Short style, no "pp")
-    m = re.match(r"108731-legging-short-(\w+)-newlogo-(\w+)", sku, re.IGNORECASE)
-    if m:
-        color_code = m.group(1).lower()
-        size_code = m.group(2).upper()
-        color = SHOPIFY_COLOR_MAP.get(color_code)
-        if color and size_code in SIZES:
-            return ("Short", color, size_code)
-
-    # Pattern 3: 108731-legging-{color}-{size}  (Long style, no "pp", no "newlogo")
-    m = re.match(r"108731-legging-(\w+)-(\w+)$", sku, re.IGNORECASE)
-    if m:
-        color_code = m.group(1).lower()
-        size_code = m.group(2).upper()
-        color = SHOPIFY_COLOR_MAP.get(color_code)
-        if color and size_code in SIZES:
-            return ("Long", color, size_code)
+    # Pattern 2 & 3 REMOVED — 108731-legging-* SKUs are maternity leggings, not PPL
 
     # Pattern 4: 108731-Newblack-highshort-{size}  (Short Black, alternate format)
     m = re.match(r"108731-Newblack-highshort-(\w+)$", sku, re.IGNORECASE)
