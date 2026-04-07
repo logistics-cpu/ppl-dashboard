@@ -68,9 +68,6 @@ if "fc_growth_mode" not in st.session_state:
     st.session_state["fc_growth_mode"] = get_setting("fc_growth_mode", "Auto (weighted average)")
 if "fc_demand_basis" not in st.session_state:
     st.session_state["fc_demand_basis"] = get_setting("fc_demand_basis", "Last week")
-if "fc_color" not in st.session_state:
-    st.session_state["fc_color"] = "All"
-
 # Shadow key for custom growth — Streamlit clears widget keys when widgets are
 # not rendered, so we keep a separate key that only WE control.
 if "_fc_custom_growth_saved" not in st.session_state:
