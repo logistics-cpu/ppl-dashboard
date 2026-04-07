@@ -392,19 +392,34 @@ if style_color_rows:
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------------------------
-# Copy-to-Slack text block
+# Copy-to-Slack text block (plain text, no emoji)
 # ---------------------------------------------------------------------------
 st.markdown("---")
 st.subheader("Copy to Slack")
+
+import re
+
+def _to_slack(md_text):
+    """Convert markdown bullets to Slack format: no emoji, clean bold markers."""
+    # Remove emoji characters (Unicode emoji ranges)
+    text = re.sub(
+        r'[\U0001f300-\U0001f9ff\u2600-\u27bf\u26aa\u26ab\U0001f534\U0001f7e1]',
+        '', md_text
+    )
+    # Convert markdown **bold** to Slack *bold*
+    text = re.sub(r'\*\*(.+?)\*\*', r'*\1*', text)
+    # Clean up double spaces from emoji removal
+    text = re.sub(r'  +', ' ', text).strip()
+    # Remove leading comma+space if emoji removal left one
+    text = re.sub(r'^,\s*', '', text)
+    return text
 
 slack_lines = []
 slack_lines.append(f"*PPL Update | Week {week_number} ({report_label})*")
 slack_lines.append("")
 
 for b in bullets:
-    # Convert markdown bold to Slack bold
-    slack_text = b.replace("**", "*")
-    slack_lines.append(f"• {slack_text}")
+    slack_lines.append(f"• {_to_slack(b)}")
 
 slack_text = "\n".join(slack_lines)
 
