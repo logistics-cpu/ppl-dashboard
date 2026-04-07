@@ -192,13 +192,22 @@ def get_auto_growth_rates(style, color, size, num_weeks):
     return rates
 
 
-def get_last_week_end(style, color, size):
+def get_last_completed_week_end(style, color, size):
+    """Return the end date of the last *completed* week with sales data.
+    The current incomplete week is excluded so forecast starts from it."""
+    today_ = date.today()
+    days_since_tue = (today_.weekday() - 1) % 7
+    current_week_start = today_ - timedelta(days=days_since_tue)
+    current_week_start_str = current_week_start.strftime("%Y-%m-%d")
+
     size_sales = [
         r for r in all_sales
         if r["style"] == style and r["color"] == color and r["size"] == size
+        and str(r["week_start"]) < current_week_start_str  # exclude current week
     ]
     if not size_sales:
-        return date.today()
+        # No completed weeks — forecast starts from current week
+        return current_week_start - timedelta(days=1)
     size_sales.sort(key=lambda r: str(r["week_start"]))
     last = size_sales[-1]
     we = last["week_end"]
@@ -237,7 +246,7 @@ def build_initial_forecast(style, color, size):
         growth_rates = [0.0] * forecast_weeks
 
     current_stock = get_current_stock(style, color, size)
-    last_week_end = get_last_week_end(style, color, size)
+    last_week_end = get_last_completed_week_end(style, color, size)
 
     rows = []
     demand = base_demand
