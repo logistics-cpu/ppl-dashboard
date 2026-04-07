@@ -47,7 +47,20 @@ for year, month in sorted(months_seen, reverse=True):
 sel_period = st.selectbox("Period", period_options, index=0, key="trend_period")
 
 
+def _current_week_start():
+    """Return the start date (Tuesday) of the current incomplete week."""
+    days_since_tue = (today.weekday() - 1) % 7
+    return (today - timedelta(days=days_since_tue)).strftime("%Y-%m-%d")
+
+
+def _exclude_current_week(df):
+    """Remove the current incomplete week from results."""
+    cw = _current_week_start()
+    return df[df["week_start"] < cw]
+
+
 def filter_by_period(df):
+    df = _exclude_current_week(df)
     if sel_period == "All":
         return df
     if sel_period.startswith("Last"):
