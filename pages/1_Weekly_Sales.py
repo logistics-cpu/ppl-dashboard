@@ -134,41 +134,49 @@ with f2:
     sel_period = st.selectbox("Period", period_options, index=3, help="Filter weeks to display")
 
 
+def _current_week_start():
+    """Return the start date (Tuesday) of the current incomplete week."""
+    days_since_tue = (today.weekday() - 1) % 7
+    return today - timedelta(days=days_since_tue)
+
+
+def _exclude_current_week(sales_list):
+    """Remove the current incomplete week from results."""
+    cw = _current_week_start().strftime("%Y-%m-%d")
+    return [r for r in sales_list if str(r["week_start"]) < cw]
+
+
 def filter_sales_by_period(sales_list):
     """Filter a list of sales rows based on the selected period."""
     if sel_period == "All":
-        return sales_list
+        return _exclude_current_week(sales_list)
 
     if sel_period == "This Week":
-        # Current week (Tue-Mon)
-        days_since_tue = (today.weekday() - 1) % 7
-        current_week_start = (today - timedelta(days=days_since_tue)).strftime("%Y-%m-%d")
-        return [r for r in sales_list if str(r["week_start"]) == current_week_start]
+        # Current week (Tue-Mon) — only period that shows incomplete week
+        cw = _current_week_start().strftime("%Y-%m-%d")
+        return [r for r in sales_list if str(r["week_start"]) == cw]
 
     if sel_period == "Previous Week":
         # Most recent completed week (Tue-Mon)
-        days_since_tue = (today.weekday() - 1) % 7
-        current_week_start = today - timedelta(days=days_since_tue)
-        prev_week_start = (current_week_start - timedelta(days=7)).strftime("%Y-%m-%d")
+        prev_week_start = (_current_week_start() - timedelta(days=7)).strftime("%Y-%m-%d")
         return [r for r in sales_list if str(r["week_start"]) == prev_week_start]
 
     if sel_period.startswith("Last"):
         num_weeks = int(sel_period.split()[1])
         cutoff = today - timedelta(weeks=num_weeks)
         cutoff_str = cutoff.strftime("%Y-%m-%d")
-        today_str = today.strftime("%Y-%m-%d")
-        return [r for r in sales_list if cutoff_str <= str(r["week_start"]) <= today_str]
+        return [r for r in _exclude_current_week(sales_list) if str(r["week_start"]) >= cutoff_str]
 
     # Month filter (e.g. "March 2026")
     try:
         month_date = datetime.strptime(sel_period, "%B %Y")
         year, month = month_date.year, month_date.month
         return [
-            r for r in sales_list
+            r for r in _exclude_current_week(sales_list)
             if _week_in_month(r["week_start"], year, month)
         ]
     except ValueError:
-        return sales_list
+        return _exclude_current_week(sales_list)
 
 
 def _week_in_month(week_start, year, month):
