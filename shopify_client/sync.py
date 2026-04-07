@@ -139,7 +139,7 @@ def sync_weekly_sales(start_date, end_date):
         from datetime import date as date_cls
         buf_start = (date_cls.fromisoformat(start_date) - timedelta(days=1)).isoformat()
         buf_end = (date_cls.fromisoformat(end_date) + timedelta(days=1)).isoformat()
-        query_str = f"created_at:>={buf_start} created_at:<={buf_end} financial_status:{fin_status}"
+        query_str = f"created_at:>={buf_start} created_at:<={buf_end} financial_status:{fin_status} -status:cancelled"
         edges = client.paginate(
             ORDERS_QUERY,
             variables={"query": query_str},
