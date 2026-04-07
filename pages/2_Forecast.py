@@ -114,12 +114,27 @@ st.markdown("")
 # Helper functions
 # ---------------------------------------------------------------------------
 
-def get_base_demand(style, color, size):
-    size_sales = [
+def _current_week_start_str():
+    """Return the current week's Tuesday as YYYY-MM-DD string."""
+    today_ = date.today()
+    days_since_tue = (today_.weekday() - 1) % 7
+    return (today_ - timedelta(days=days_since_tue)).strftime("%Y-%m-%d")
+
+
+def _completed_sales(style, color, size):
+    """Return sales rows excluding the current incomplete week, sorted by week_start."""
+    cw = _current_week_start_str()
+    sales = [
         r for r in all_sales
         if r["style"] == style and r["color"] == color and r["size"] == size
+        and str(r["week_start"]) < cw
     ]
-    size_sales.sort(key=lambda r: str(r["week_start"]))
+    sales.sort(key=lambda r: str(r["week_start"]))
+    return sales
+
+
+def get_base_demand(style, color, size):
+    size_sales = _completed_sales(style, color, size)
 
     if not size_sales:
         inv = inv_lookup.get((style, color, size), {})
@@ -150,11 +165,7 @@ def get_auto_growth_rates(style, color, size, num_weeks):
     rate feeds back into the weighted average for the next week — so the rate
     naturally evolves (and typically decays toward 0) over time.
     """
-    size_sales = [
-        r for r in all_sales
-        if r["style"] == style and r["color"] == color and r["size"] == size
-    ]
-    size_sales.sort(key=lambda r: str(r["week_start"]))
+    size_sales = _completed_sales(style, color, size)
 
     if len(size_sales) < 2:
         return [0.0] * num_weeks
