@@ -2,6 +2,7 @@
 
 import streamlit as st
 st.set_page_config(layout="wide")
+import json
 import pandas as pd
 from datetime import datetime, timedelta, date
 
@@ -414,12 +415,22 @@ for style_idx, style in enumerate(STYLES):
                 "Growth", "Opening Stock", "Closing Stock", "Stock Life", "Alert",
             ]
 
-            # Persistent inbound store — survives tab switches
+            # Persistent inbound store — survives tab switches, refresh, and sleep
             if "fc_inbound" not in st.session_state:
-                st.session_state["fc_inbound"] = {}  # {editor_key: {row_idx: {col: val}}}
+                # Load from database on first run
+                saved_json = get_setting("fc_inbound", "{}")
+                try:
+                    loaded = json.loads(saved_json)
+                    # Convert string keys back to int for row indices
+                    parsed = {}
+                    for ek, rows in loaded.items():
+                        parsed[ek] = {int(k): v for k, v in rows.items()}
+                    st.session_state["fc_inbound"] = parsed
+                except (json.JSONDecodeError, TypeError):
+                    st.session_state["fc_inbound"] = {}
 
             def _save_inbound(editor_key):
-                """Callback: capture inbound edits into persistent store."""
+                """Callback: capture inbound edits into persistent store and DB."""
                 edits = st.session_state.get(editor_key, {})
                 edited_rows = edits.get("edited_rows", {}) if isinstance(edits, dict) else {}
                 if not edited_rows:
@@ -434,6 +445,12 @@ for style_idx, style in enumerate(STYLES):
                     for col, val in changes.items():
                         if col in ("China Inbound", "US Inbound"):
                             store[editor_key][row_idx][col] = val
+                # Save entire inbound store to DB
+                # Convert int keys to str for JSON serialization
+                serializable = {}
+                for ek, rows in store.items():
+                    serializable[ek] = {str(k): v for k, v in rows.items()}
+                set_setting("fc_inbound", json.dumps(serializable))
 
             stockout_sizes_all = []
 
