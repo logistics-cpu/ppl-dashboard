@@ -204,18 +204,22 @@ with tab_shopify:
         )
 
     # Date range
+    from datetime import timedelta
+    yesterday = date.today() - timedelta(days=1)
+    last_week_start = yesterday - timedelta(days=6)
+
     col1, col2 = st.columns(2)
     with col1:
         sync_start = st.date_input(
             "From date",
-            value=date(2025, 12, 16),
+            value=last_week_start,
             key="sync_start",
             help="Start of the date range to pull sales data for.",
         )
     with col2:
         sync_end = st.date_input(
             "To date",
-            value=date.today(),
+            value=yesterday,
             key="sync_end",
             help="End of the date range (inclusive).",
         )
