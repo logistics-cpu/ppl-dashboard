@@ -259,13 +259,10 @@ def build_initial_forecast(style, color, size):
         if w > 1:
             demand = demand * (1 + wg)
 
-        weekly_demand = round(demand * 7)
-
         rows.append({
             "Size": size,
             "Week Date": format_week_range(week_start, week_end),
-            "Proj. Demand": weekly_demand,
-            "Daily Demand": round(demand, 1),
+            "Proj. Daily Demand": round(demand, 1),
             "Growth": f"{wg:.1%}" if wg != 0 else "—",
             "Opening Stock": 0,  # calculated after
             "Closing Stock": 0,  # calculated after
@@ -289,14 +286,14 @@ def recalculate_forecast(df, current_stocks):
 
     for _, row in df.iterrows():
         size = row["Size"]
-        demand_daily = row["Daily Demand"]
-        proj_demand = row["Proj. Demand"]
+        demand_daily = row["Proj. Daily Demand"]
+        weekly_demand = round(demand_daily * 7)
         china_in = int(row["China Inbound"]) if row["China Inbound"] else 0
         us_in = int(row["US Inbound"]) if row["US Inbound"] else 0
         total_inbound = china_in + us_in
 
         opening = stock_by_size.get(size, 0)
-        closing = max(0, opening - proj_demand + total_inbound)
+        closing = max(0, opening - weekly_demand + total_inbound)
 
         life = stock_life_days(closing, demand_daily) if demand_daily > 0 else None
 
@@ -313,8 +310,7 @@ def recalculate_forecast(df, current_stocks):
         result_rows.append({
             "Size": size,
             "Week Date": row["Week Date"],
-            "Proj. Demand": proj_demand,
-            "Daily Demand": demand_daily,
+            "Proj. Daily Demand": demand_daily,
             "Growth": row["Growth"],
             "Opening Stock": opening,
             "Closing Stock": closing,
@@ -366,8 +362,7 @@ for style_idx, style in enumerate(STYLES):
 
             _col_config = {
                 "Week Date": st.column_config.TextColumn("Week Date", width="small"),
-                "Proj. Demand": st.column_config.NumberColumn("Proj. Demand", format="%d"),
-                "Daily Demand": st.column_config.NumberColumn("Daily Demand", format="%.1f"),
+                "Proj. Daily Demand": st.column_config.NumberColumn("Proj. Daily Demand", format="%.1f"),
                 "Growth": st.column_config.TextColumn("Growth", width="small"),
                 "Opening Stock": st.column_config.NumberColumn("Opening Stock", format="%d"),
                 "China Inbound": st.column_config.NumberColumn(
@@ -383,7 +378,7 @@ for style_idx, style in enumerate(STYLES):
                 "Alert": st.column_config.TextColumn("Alert", width="small"),
             }
             _disabled_cols = [
-                "Week Date", "Proj. Demand", "Daily Demand",
+                "Week Date", "Proj. Daily Demand",
                 "Growth", "Opening Stock", "Closing Stock", "Stock Life", "Alert",
             ]
 
