@@ -77,7 +77,9 @@ def _save_fc_settings():
     """Save forecast settings to database on any change."""
     set_setting("fc_weeks", st.session_state.get("fc_weeks", 8))
     set_setting("fc_growth_mode", st.session_state.get("fc_growth_mode", "Auto (weighted average)"))
-    set_setting("fc_custom_growth", st.session_state.get("fc_custom_growth", 5.0))
+    # Only save custom growth if it's actually in session_state (widget rendered)
+    if "fc_custom_growth" in st.session_state:
+        set_setting("fc_custom_growth", st.session_state["fc_custom_growth"])
     set_setting("fc_demand_basis", st.session_state.get("fc_demand_basis", "Last week"))
 
 c1, c2, c3, c4 = st.columns(4, gap="medium")
@@ -108,6 +110,10 @@ with c3:
         ) / 100
     else:
         custom_growth = 0.0
+        # Preserve custom growth value even when widget isn't rendered
+        # so it's still there when user switches back to Custom %
+        if "fc_custom_growth" not in st.session_state:
+            st.session_state["fc_custom_growth"] = float(get_setting("fc_custom_growth", "5.0"))
         st.empty()
 
 with c4:
