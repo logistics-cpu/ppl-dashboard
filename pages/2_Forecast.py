@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, date
 
 from core.config import STYLES, COLORS, SIZES
 from core.database import (
-    init_db, get_weekly_sales, get_latest_inventory, get_setting,
+    init_db, get_weekly_sales, get_latest_inventory, get_setting, set_setting,
     get_production_arrivals, get_warehouse_transfers,
 )
 from core.calculations import stock_life_days, stockout_date
@@ -60,17 +60,25 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Persist settings across tab switches — initialise session_state defaults once
+# Persist settings — load from database (survives refresh/sleep), fall back to defaults
 if "fc_weeks" not in st.session_state:
-    st.session_state["fc_weeks"] = 8
+    st.session_state["fc_weeks"] = int(get_setting("fc_weeks", "8"))
 if "fc_growth_mode" not in st.session_state:
-    st.session_state["fc_growth_mode"] = "Auto (weighted average)"
+    st.session_state["fc_growth_mode"] = get_setting("fc_growth_mode", "Auto (weighted average)")
 if "fc_custom_growth" not in st.session_state:
-    st.session_state["fc_custom_growth"] = 5.0
+    st.session_state["fc_custom_growth"] = float(get_setting("fc_custom_growth", "5.0"))
 if "fc_demand_basis" not in st.session_state:
-    st.session_state["fc_demand_basis"] = "Last week"
+    st.session_state["fc_demand_basis"] = get_setting("fc_demand_basis", "Last week")
 if "fc_color" not in st.session_state:
     st.session_state["fc_color"] = "All"
+
+
+def _save_fc_settings():
+    """Save forecast settings to database on any change."""
+    set_setting("fc_weeks", st.session_state.get("fc_weeks", 8))
+    set_setting("fc_growth_mode", st.session_state.get("fc_growth_mode", "Auto (weighted average)"))
+    set_setting("fc_custom_growth", st.session_state.get("fc_custom_growth", 5.0))
+    set_setting("fc_demand_basis", st.session_state.get("fc_demand_basis", "Last week"))
 
 c1, c2, c3, c4 = st.columns(4, gap="medium")
 
@@ -79,6 +87,7 @@ with c1:
         "Weeks to forecast", 4, 20,
         help="Number of future weeks to project",
         key="fc_weeks",
+        on_change=_save_fc_settings,
     )
 
 with c2:
@@ -87,6 +96,7 @@ with c2:
         ["Auto (weighted average)", "Custom %", "Flat (0%)"],
         help="How to project future demand",
         key="fc_growth_mode",
+        on_change=_save_fc_settings,
     )
 
 with c3:
@@ -94,6 +104,7 @@ with c3:
         custom_growth = st.number_input(
             "Weekly growth %", -50.0, 200.0, step=1.0,
             key="fc_custom_growth",
+            on_change=_save_fc_settings,
         ) / 100
     else:
         custom_growth = 0.0
@@ -105,6 +116,7 @@ with c4:
         ["Last 4 weeks avg", "Last 2 weeks avg", "Last week", "ERP 7-day avg"],
         help="Which period to use as base demand",
         key="fc_demand_basis",
+        on_change=_save_fc_settings,
     )
 
 st.markdown("")
