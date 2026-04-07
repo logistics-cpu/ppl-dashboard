@@ -39,12 +39,14 @@ def check_password():
             '<p style="text-align:center;color:#475569;margin-top:4px;margin-bottom:2rem;">Enter your team password to continue</p>',
             unsafe_allow_html=True,
         )
-        password = st.text_input("Password", type="password", key="login_password", label_visibility="collapsed", placeholder="Enter password...")
-        if st.button("Sign In", type="primary", use_container_width=True):
-            if hmac.compare_digest(password, correct_password):
-                st.session_state["authenticated"] = True
-                st.rerun()
-            else:
-                st.error("Incorrect password.")
+        with st.form("login_form"):
+            password = st.text_input("Password", type="password", key="login_password", label_visibility="collapsed", placeholder="Enter password...")
+            submitted = st.form_submit_button("Sign In", type="primary", use_container_width=True)
+            if submitted:
+                if hmac.compare_digest(password, correct_password):
+                    st.session_state["authenticated"] = True
+                    st.rerun()
+                else:
+                    st.error("Incorrect password.")
 
     return False
