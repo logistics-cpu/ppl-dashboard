@@ -68,7 +68,7 @@ if "fc_growth_mode" not in st.session_state:
 if "fc_custom_growth" not in st.session_state:
     st.session_state["fc_custom_growth"] = 5.0
 if "fc_demand_basis" not in st.session_state:
-    st.session_state["fc_demand_basis"] = "Last 4 weeks avg"
+    st.session_state["fc_demand_basis"] = "Last week"
 if "fc_color" not in st.session_state:
     st.session_state["fc_color"] = "All"
 
