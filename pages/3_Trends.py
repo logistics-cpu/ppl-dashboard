@@ -6,7 +6,7 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta, date
 
-from core.config import STYLES, COLORS, SIZES
+from core.config import STYLES, COLORS, SIZES, ALL_STYLES, ALL_SIZES, get_colors, get_sizes
 from core.database import init_db, get_weekly_sales, get_latest_inventory
 from core.auth import check_password
 from core.theme import inject_css, page_header, PLOTLY_LAYOUT, CHART_COLORS
@@ -98,10 +98,12 @@ def format_week(ws):
 # ---------------------------------------------------------------------------
 def render_style_charts(style, df):
     """Show units sold by size (line) + total area chart for a style tab."""
-    colors_in_data = [c for c in COLORS if c in df["color"].values]
+    style_colors = get_colors(style)
+    style_sizes = get_sizes(style)
+    colors_in_data = [c for c in style_colors if c in df["color"].values]
 
     for color in colors_in_data:
-        color_emoji = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷"}.get(color, "")
+        color_emoji = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "—": ""}.get(color, "")
         uid = f"{style}_{color}".replace(" ", "_").replace("/", "")
         st.markdown(f"#### {color_emoji} {style} ( {color})")
 
@@ -117,7 +119,7 @@ def render_style_charts(style, df):
             by_size, x="week_label", y="units", color="size",
             title=f"Units Sold by Size",
             labels={"week_label": "Week", "units": "Units Sold", "size": "Size"},
-            category_orders={"size": SIZES},
+            category_orders={"size": style_sizes},
             color_discrete_sequence=CHART_COLORS,
             markers=True,
         )
@@ -152,7 +154,7 @@ def render_style_charts(style, df):
 # ---------------------------------------------------------------------------
 def render_color_charts(color, df):
     """Show aggregated units (all sizes summed) per style for a color tab."""
-    color_emoji = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷"}.get(color, "")
+    color_emoji = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "—": ""}.get(color, "")
 
     # Stacked bar: all styles on one chart
     by_style_week = df.groupby(["week_start", "style"]).agg(
@@ -169,7 +171,7 @@ def render_color_charts(color, df):
             by_style_week, x="week_label", y="units", color="style",
             title=f"Total Units Sold by Style (All Sizes Combined)",
             labels={"week_label": "Week", "units": "Units Sold", "style": "Style"},
-            category_orders={"style": STYLES},
+            category_orders={"style": ALL_STYLES},
             color_discrete_sequence=CHART_COLORS,
             barmode="group",
         )
@@ -200,7 +202,7 @@ def render_color_charts(color, df):
         st.markdown("---")
 
     # Individual style sections
-    for style in STYLES:
+    for style in ALL_STYLES:
         sdf = df[df["style"] == style].copy()
         if sdf.empty:
             continue
@@ -230,14 +232,19 @@ def render_color_charts(color, df):
 # Tabs: Long | 7/8 | Short | ⚫ Black | 🫒 Olive Green | 🍷 Burgundy
 # ---------------------------------------------------------------------------
 st.markdown("")
-color_emoji_map = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷"}
-tab_labels = STYLES + [f"{color_emoji_map.get(c, '')} {c}" for c in COLORS]
+color_emoji_map = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "—": ""}
+all_colors_seen = []
+for _s in ALL_STYLES:
+    for _c in get_colors(_s):
+        if _c not in all_colors_seen:
+            all_colors_seen.append(_c)
+tab_labels = ALL_STYLES + [f"{color_emoji_map.get(c, '')} {c}" for c in all_colors_seen]
 all_tabs = st.tabs(tab_labels)
 
 df_filtered = filter_by_period(df_all)
 
 # --- Style tabs ---
-for style_idx, style in enumerate(STYLES):
+for style_idx, style in enumerate(ALL_STYLES):
     with all_tabs[style_idx]:
         sdf = df_filtered[df_filtered["style"] == style]
         if sdf.empty:
@@ -246,8 +253,8 @@ for style_idx, style in enumerate(STYLES):
             render_style_charts(style, sdf)
 
 # --- Color tabs ---
-for color_idx, color in enumerate(COLORS):
-    with all_tabs[len(STYLES) + color_idx]:
+for color_idx, color in enumerate(all_colors_seen):
+    with all_tabs[len(ALL_STYLES) + color_idx]:
         cdf = df_filtered[df_filtered["color"] == color]
         if cdf.empty:
             st.info(f"No sales data for {color}.")

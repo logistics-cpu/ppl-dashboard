@@ -3,7 +3,7 @@
 import re
 from core.config import (
     SHOPIFY_STYLE_MAP, SHOPIFY_COLOR_MAP,
-    ERP_SKU_REVERSE, SIZES,
+    ERP_SKU_REVERSE, SIZES, NP_SKU_MAP,
 )
 
 
@@ -11,18 +11,28 @@ def parse_shopify_sku(sku):
     """
     Parse a Shopify SKU string into (style, color, size).
 
-    Supported formats (PPL only — excludes maternity legging SKUs):
-      108731-pplegging-full-black-newlogo-M       → (Long, Black, M)
-      108731-pplegging-7/8s-green-newlogo-L       → (7/8, Olive Green, L)
-      108731-pplegging-short-red-newlogo-S         → (Short, Burgundy, S)
-      108731-Newblack-highshort-XS                 → (Short, Black, XS)
-      108731-Newblack-high-M                       → (Long, Black, M)
-      108731-Newblack-high7-L                      → (7/8, Black, L)
+    Supported formats:
+      PPL:
+        108731-pplegging-full-black-newlogo-M       → (Long, Black, M)
+        108731-pplegging-7/8s-green-newlogo-L       → (7/8, Olive Green, L)
+        108731-Newblack-highshort-XS                 → (Short, Black, XS)
+        108731-Newblack-high-M                       → (Long, Black, M)
+        108731-Newblack-high7-L                      → (7/8, Black, L)
+      Nursing Pillow:
+        J11268-breastfeeding-pillow-Large            → (Nursing Pillow, —, Large)
+        J11268-breastfeeding-pillow-Set              → (Nursing Pillow, —, Set)
 
     Returns (style, color, size) or None if can't parse.
     """
     if not sku:
         return None
+
+    # --- Nursing Pillow (exact match) ---
+    np_result = NP_SKU_MAP.get(sku)
+    if np_result:
+        return np_result
+
+    # --- PPL patterns ---
 
     # Pattern 1: 108731-pplegging-{style}-{color}-newlogo-{size}
     m = re.match(r"108731-pplegging-([\w/]+)-(\w+)-newlogo-(\w+)", sku, re.IGNORECASE)
@@ -64,16 +74,18 @@ def parse_shopify_sku(sku):
 def parse_erp_sku(sku):
     """
     Parse an ERP SKU string into (style, color, size).
-    Formats:
-      108731-blackBB-high-M       → (Long, Black, M)
-      108731-blackBB-high7-XL     → (7/8, Black, XL)
-      136181-armygreen-highshort-S → (Short, Olive Green, S)
 
     Returns (style, color, size) or None if can't parse.
     """
     if not sku:
         return None
 
+    # --- Nursing Pillow (exact match) ---
+    np_result = NP_SKU_MAP.get(sku)
+    if np_result:
+        return np_result
+
+    # --- PPL patterns ---
     # Try each known prefix pattern (longest match first to avoid partial matches)
     for prefix, (color, style) in sorted(ERP_SKU_REVERSE.items(), key=lambda x: -len(x[0])):
         if sku.startswith(prefix + "-"):
@@ -84,6 +96,10 @@ def parse_erp_sku(sku):
     return None
 
 
-def is_ppl_erp_sku(sku):
-    """Check if an ERP SKU belongs to a PPL product."""
+def is_tracked_sku(sku):
+    """Check if a SKU belongs to any tracked product."""
     return parse_erp_sku(sku) is not None
+
+
+# Backward compat alias
+is_ppl_erp_sku = is_tracked_sku

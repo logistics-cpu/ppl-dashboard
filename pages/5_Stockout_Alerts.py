@@ -3,7 +3,7 @@
 import streamlit as st
 st.set_page_config(layout="wide")
 import pandas as pd
-from core.config import STYLES, COLORS, SIZES
+from core.config import STYLES, COLORS, SIZES, ALL_STYLES, ALL_SIZES, get_colors, get_sizes
 from core.database import init_db, get_latest_inventory, get_setting
 from core.calculations import stock_life_days, stockout_date, suggested_reorder_qty
 from core.auth import check_password
@@ -255,7 +255,7 @@ display_df.columns = [
 ]
 
 # Sort by size order XS → 3XL
-SIZE_ORDER = {s: i for i, s in enumerate(SIZES)}
+SIZE_ORDER = {s: i for i, s in enumerate(ALL_SIZES)}
 display_df["_size_order"] = display_df["Size"].map(SIZE_ORDER)
 display_df = display_df.sort_values(["Stock Life (Days)", "_size_order"]).drop(columns=["_size_order"]).reset_index(drop=True)
 

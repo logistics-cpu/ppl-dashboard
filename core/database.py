@@ -247,17 +247,23 @@ def init_db():
 
 
 def _seed_products(conn):
-    from core.config import ERP_SKU_MAP
-    existing = conn.execute("SELECT COUNT(*) FROM products").fetchone()[0]
-    if existing > 0:
-        return
-    for style in STYLES:
-        for color in COLORS:
-            for size in SIZES:
+    from core.config import ERP_SKU_MAP, STYLE_CONFIG, NP_SKU_MAP
+    for style, cfg in STYLE_CONFIG.items():
+        for color in cfg["colors"]:
+            for size in cfg["sizes"]:
+                # Determine ERP SKU
                 erp_info = ERP_SKU_MAP.get((color, style))
-                erp_sku = f"{erp_info[0]}-{erp_info[1]}-{erp_info[2]}-{size}" if erp_info else None
+                if erp_info:
+                    erp_sku = f"{erp_info[0]}-{erp_info[1]}-{erp_info[2]}-{size}"
+                else:
+                    # Check NP exact-match map
+                    erp_sku = None
+                    for sku, (s, c, sz) in NP_SKU_MAP.items():
+                        if s == style and c == color and sz == size:
+                            erp_sku = sku
+                            break
                 conn.execute(
-                    "INSERT INTO products (style, color, size, erp_sku) VALUES (?, ?, ?, ?)",
+                    "INSERT OR IGNORE INTO products (style, color, size, erp_sku) VALUES (?, ?, ?, ?)",
                     (style, color, size, erp_sku),
                 )
 

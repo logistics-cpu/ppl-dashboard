@@ -5,7 +5,7 @@ st.set_page_config(layout="wide")
 import pandas as pd
 from datetime import datetime, timedelta, date
 
-from core.config import STYLES, COLORS, SIZES
+from core.config import STYLES, COLORS, SIZES, ALL_STYLES, ALL_SIZES, get_colors, get_sizes
 from core.database import (
     init_db, get_weekly_sales, get_latest_inventory, get_setting,
     get_production_arrivals, get_warehouse_transfers,
@@ -24,7 +24,7 @@ init_db()
 
 page_header("Weekly Sales", "Sales data by style — units sold, demand, stock levels")
 
-SIZE_ORDER = {s: i for i, s in enumerate(SIZES)}
+SIZE_ORDER = {s: i for i, s in enumerate(ALL_SIZES)}
 
 
 def format_week_range(week_start_str, week_end_str):
@@ -192,9 +192,12 @@ def _week_in_month(week_start, year, month):
 # ---------------------------------------------------------------------------
 # Helper: build and render a sales table for a given style + color combo
 # ---------------------------------------------------------------------------
+_COLOR_EMOJI = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "—": ""}
+
+
 def render_sales_table(style, color, color_sales, heading):
     """Build and display the sales table for one style+color combo."""
-    color_emoji = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷"}.get(color, "")
+    color_emoji = _COLOR_EMOJI.get(color, "")
     st.markdown(f"### {color_emoji} {heading}")
 
     if not color_sales:
@@ -207,7 +210,7 @@ def render_sales_table(style, color, color_sales, heading):
     sales_df = sales_df.sort_values(["size_order", "week_start"]).reset_index(drop=True)
 
     table_rows = []
-    for size in SIZES:
+    for size in get_sizes(style):
         size_data = sales_df[sales_df["size"] == size].sort_values("week_start")
         if size_data.empty:
             continue
@@ -340,33 +343,54 @@ def render_sales_table(style, color, color_sales, heading):
 
 
 # ---------------------------------------------------------------------------
-# Tabs: Long | 7/8 | Short | ⚫ Black | 🫒 Olive Green | 🍷 Burgundy
+# Tabs: Long | 7/8 | Short | Nursing Pillow | ⚫ Black | 🫒 Olive Green | 🍷 Burgundy
 # ---------------------------------------------------------------------------
 st.markdown("")
 color_emoji_map = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷"}
-tab_labels = STYLES + [f"{color_emoji_map.get(c, '')} {c}" for c in COLORS]
+tab_labels = ALL_STYLES + [f"{color_emoji_map.get(c, '')} {c}" for c in COLORS]
 all_tabs = st.tabs(tab_labels)
 
-# --- Style tabs (Long, 7/8, Short): grouped by color ---
-for style_idx, style in enumerate(STYLES):
+# --- Style tabs: grouped by color ---
+for style_idx, style in enumerate(ALL_STYLES):
     with all_tabs[style_idx]:
+        style_colors = get_colors(style)
         style_sales = [r for r in all_sales if r["style"] == style]
-        if color_filter:
+
+        # Color filter only applies when the style actually has that color
+        apply_color_filter = color_filter and color_filter in style_colors
+        if apply_color_filter:
             style_sales = [r for r in style_sales if r["color"] == color_filter]
+
         style_sales = filter_sales_by_period(style_sales)
 
-        colors_to_show = [color_filter] if color_filter else COLORS
-        for color in colors_to_show:
-            color_sales = [r for r in style_sales if r["color"] == color]
-            render_sales_table(style, color, color_sales, f"{style} ( {color})")
+        colors_to_show = [color_filter] if apply_color_filter else style_colors
+
+        # Use container instead of tabs when there is only one color
+        if len(colors_to_show) == 1:
+            color_containers = [st.container()]
+        else:
+            color_containers = st.tabs(colors_to_show)
+
+        for ci, color in enumerate(colors_to_show):
+            with color_containers[ci]:
+                color_sales = [r for r in style_sales if r["color"] == color]
+                if color == "—":
+                    heading = style
+                else:
+                    heading = f"{style} ( {color})"
+                render_sales_table(style, color, color_sales, heading)
 
 # --- Color tabs (Black, Olive Green, Burgundy): aggregated by style ---
 for color_idx, color in enumerate(COLORS):
-    with all_tabs[len(STYLES) + color_idx]:
+    with all_tabs[len(ALL_STYLES) + color_idx]:
         color_sales_all = [r for r in all_sales if r["color"] == color]
         color_sales_all = filter_sales_by_period(color_sales_all)
 
-        for style in STYLES:
+        for style in ALL_STYLES:
+            # Skip styles that don't have this color
+            if color not in get_colors(style):
+                continue
+
             style_color_sales = [r for r in color_sales_all if r["style"] == style]
             c_emoji = color_emoji_map.get(color, "")
             st.markdown(f"### {c_emoji} {style} ( {color})")

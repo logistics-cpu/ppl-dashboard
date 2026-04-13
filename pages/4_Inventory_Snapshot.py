@@ -5,7 +5,7 @@ st.set_page_config(layout="wide")
 import pandas as pd
 from core.auth import check_password
 from core.theme import inject_css, page_header, metric_row, CRITICAL_BG, WARNING_BG, OK_BG
-from core.config import STYLES, COLORS, SIZES, WAREHOUSE_DISPLAY_NAMES
+from core.config import STYLES, COLORS, SIZES, WAREHOUSE_DISPLAY_NAMES, ALL_STYLES, ALL_SIZES, get_colors, get_sizes
 from core.database import init_db, get_latest_inventory, get_setting
 from core.calculations import stock_life_days, stockout_date
 
@@ -23,7 +23,7 @@ filter_cols = st.columns([1, 1, 1, 1])
 with filter_cols[0]:
     sel_warehouse = st.selectbox("Warehouse", ["All"] + WAREHOUSE_DISPLAY_NAMES)
 with filter_cols[1]:
-    sel_style = st.selectbox("Style", ["All"] + STYLES, key="inv_style")
+    sel_style = st.selectbox("Style", ["All"] + ALL_STYLES, key="inv_style")
 with filter_cols[2]:
     sel_color = st.selectbox("Color", ["All"] + COLORS, key="inv_color")
 
@@ -105,7 +105,7 @@ display_df.columns = [
 ]
 
 # Sort by size order XS → 3XL
-SIZE_ORDER = {s: i for i, s in enumerate(SIZES)}
+SIZE_ORDER = {s: i for i, s in enumerate(ALL_SIZES)}
 display_df["_size_order"] = display_df["Size"].map(SIZE_ORDER)
 display_df = display_df.sort_values(["Style", "Color", "_size_order", "Warehouse"]).drop(columns=["_size_order"]).reset_index(drop=True)
 

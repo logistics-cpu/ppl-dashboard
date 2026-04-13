@@ -23,7 +23,42 @@ SHOPIFY_STORE_URL = _get_config("SHOPIFY_STORE_URL")
 SHOPIFY_ACCESS_TOKEN = _get_config("SHOPIFY_ACCESS_TOKEN")
 SHOPIFY_API_VERSION = _get_config("SHOPIFY_API_VERSION", "2025-10")
 
-# Product matrix
+# ---------------------------------------------------------------------------
+# Product registry — per-style configuration
+# ---------------------------------------------------------------------------
+PRODUCT_GROUPS = {
+    "PPL": ["Long", "7/8", "Short"],
+    "Nursing Pillow": ["Nursing Pillow"],
+}
+
+STYLE_CONFIG = {
+    "Long":           {"colors": ["Black", "Olive Green", "Burgundy"], "sizes": ["XS", "S", "M", "L", "XL", "2XL", "3XL"]},
+    "7/8":            {"colors": ["Black", "Olive Green", "Burgundy"], "sizes": ["XS", "S", "M", "L", "XL", "2XL", "3XL"]},
+    "Short":          {"colors": ["Black", "Olive Green", "Burgundy"], "sizes": ["XS", "S", "M", "L", "XL", "2XL", "3XL"]},
+    "Nursing Pillow": {"colors": ["\u2014"], "sizes": ["Large", "Set"]},
+}
+
+ALL_STYLES = list(STYLE_CONFIG.keys())
+
+
+def get_colors(style):
+    """Return the color list for a given style."""
+    return STYLE_CONFIG.get(style, {}).get("colors", [])
+
+
+def get_sizes(style):
+    """Return the size list for a given style."""
+    return STYLE_CONFIG.get(style, {}).get("sizes", [])
+
+
+# Union of all sizes across all styles (for ordering)
+ALL_SIZES = []
+for _cfg in STYLE_CONFIG.values():
+    for _s in _cfg["sizes"]:
+        if _s not in ALL_SIZES:
+            ALL_SIZES.append(_s)
+
+# PPL-only aliases (backward compatibility)
 STYLES = ["Long", "7/8", "Short"]
 COLORS = ["Black", "Olive Green", "Burgundy"]
 SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL"]
@@ -71,6 +106,12 @@ SHOPIFY_COLOR_MAP = {
     "green": "Olive Green",
     "burgundy": "Burgundy",
     "red": "Burgundy",
+}
+
+# Nursing Pillow SKU mapping (exact-match, same for Shopify and ERP)
+NP_SKU_MAP = {
+    "J11268-breastfeeding-pillow-Large": ("Nursing Pillow", "\u2014", "Large"),
+    "J11268-breastfeeding-pillow-Set":   ("Nursing Pillow", "\u2014", "Set"),
 }
 
 # Default settings

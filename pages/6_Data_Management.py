@@ -4,7 +4,7 @@ import streamlit as st
 st.set_page_config(layout="wide")
 import pandas as pd
 from datetime import date, datetime
-from core.config import STYLES, COLORS, SIZES, WAREHOUSE_DISPLAY_NAMES
+from core.config import STYLES, COLORS, SIZES, ALL_STYLES, get_colors, get_sizes, WAREHOUSE_DISPLAY_NAMES
 from core.database import (
     init_db, get_setting, set_setting, log_sync,
     insert_inventory_snapshot,
@@ -264,7 +264,7 @@ with tab_shopify:
             import re
             from core.config import SIZES, COLORS
 
-            STYLE_TAB_MAP = {"Long": "Long", "7/8": "7/8", "78": "7/8", "Short": "Short"}
+            STYLE_TAB_MAP = {"Long": "Long", "7/8": "7/8", "78": "7/8", "Short": "Short", "Nursing Pillow": "Nursing Pillow"}
             COLOR_MAP_SHEET = {"Black": "Black", "Olive Green": "Olive Green", "Burgundy": "Burgundy"}
 
             all_rows = []
@@ -332,7 +332,7 @@ with tab_shopify:
                     # Check for size value
                     if size_col is not None and pd.notna(row_vals[size_col]):
                         sz = str(row_vals[size_col]).strip()
-                        if sz in SIZES:
+                        if sz in get_sizes(style):
                             current_size = sz
 
                     if not current_size:
@@ -494,14 +494,14 @@ with tab_arrivals:
     </div>
     """, unsafe_allow_html=True)
 
+    arr_style = st.selectbox("Style", ALL_STYLES, key="arr_style")
+
     with st.form("arrival_form"):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            arr_style = st.selectbox("Style", STYLES, key="arr_style")
+        col2, col3 = st.columns(2)
         with col2:
-            arr_color = st.selectbox("Color", COLORS, key="arr_color")
+            arr_color = st.selectbox("Color", get_colors(arr_style), key=f"arr_color_{arr_style}")
         with col3:
-            arr_size = st.selectbox("Size", SIZES, key="arr_size")
+            arr_size = st.selectbox("Size", get_sizes(arr_style), key=f"arr_size_{arr_style}")
 
         col4, col5 = st.columns(2)
         with col4:
@@ -579,14 +579,14 @@ with tab_transfers:
     </div>
     """, unsafe_allow_html=True)
 
+    tr_style = st.selectbox("Style", ALL_STYLES, key="tr_style")
+
     with st.form("transfer_form"):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            tr_style = st.selectbox("Style", STYLES, key="tr_style")
+        col2, col3 = st.columns(2)
         with col2:
-            tr_color = st.selectbox("Color", COLORS, key="tr_color")
+            tr_color = st.selectbox("Color", get_colors(tr_style), key=f"tr_color_{tr_style}")
         with col3:
-            tr_size = st.selectbox("Size", SIZES, key="tr_size")
+            tr_size = st.selectbox("Size", get_sizes(tr_style), key=f"tr_size_{tr_style}")
 
         col4, col5, col6 = st.columns(3)
         with col4:

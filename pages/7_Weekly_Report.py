@@ -5,7 +5,7 @@ st.set_page_config(layout="wide")
 import pandas as pd
 from datetime import datetime, timedelta, date
 
-from core.config import STYLES, COLORS, SIZES
+from core.config import STYLES, COLORS, SIZES, ALL_STYLES, PRODUCT_GROUPS, get_colors, get_sizes
 from core.database import init_db, get_weekly_sales, get_latest_inventory, get_setting
 from core.calculations import weekly_growth_rate, daily_demand, stock_life_days
 from core.theme import inject_css, page_header, PRIMARY, TEXT_MUTED
@@ -130,7 +130,7 @@ for r in all_inv:
 # ---------------------------------------------------------------------------
 # Compute metrics for report
 # ---------------------------------------------------------------------------
-_COLOR_EMOJI = {"Black": "\u26ab", "Olive Green": "\U0001f9c0", "Burgundy": "\U0001f377"}
+_COLOR_EMOJI = {"Black": "\u26ab", "Olive Green": "\U0001f9c0", "Burgundy": "\U0001f377", "\u2014": ""}
 
 # Total units this week vs last
 total_this = sum(current_agg.values())
@@ -139,8 +139,8 @@ total_growth = weekly_growth_rate(total_this, total_prev)
 
 # Style+color breakdown with growth
 style_color_rows = []
-for style in STYLES:
-    for color in COLORS:
+for style in ALL_STYLES:
+    for color in get_colors(style):
         key = (style, color)
         this_units = current_agg.get(key, 0)
         prev_units = prev_agg.get(key, 0)
@@ -169,7 +169,7 @@ def _stock_tolerance(style, color):
     """Calculate max weekly growth % stock can handle for threshold_days."""
     total_stock = 0
     total_daily = 0
-    for size in SIZES:
+    for size in get_sizes(style):
         inv_key = (style, color, size)
         sku_key = (style, color, size)
         stock = inv_lookup.get(inv_key, {}).get("available_qty", 0)
@@ -208,9 +208,9 @@ critical_sizes = []
 warning_sizes = []
 ok_sizes = []
 
-for style in STYLES:
-    for color in COLORS:
-        for size in SIZES:
+for style in ALL_STYLES:
+    for color in get_colors(style):
+        for size in get_sizes(style):
             inv_key = (style, color, size)
             sku_key = (style, color, size)
             stock = inv_lookup.get(inv_key, {}).get("available_qty", 0)
@@ -259,25 +259,35 @@ def _trend_description(style, color):
 # ---------------------------------------------------------------------------
 st.markdown("---")
 
-# Header
-st.markdown(
-    f'<h2 style="margin-bottom:0;">'
-    f'\U0001f9d1\u200d\U0001f4bc PPL Update | Week {week_number} ({report_label})</h2>',
-    unsafe_allow_html=True,
-)
+# ---------------------------------------------------------------------------
+# Per-product-group summaries
+# ---------------------------------------------------------------------------
+for group_name, group_styles in PRODUCT_GROUPS.items():
+    # Filter data for this product group
+    group_this = sum(v for (s, c), v in current_agg.items() if s in group_styles)
+    group_prev = sum(v for (s, c), v in prev_agg.items() if s in group_styles) if prev_agg else 0
+    group_growth = weekly_growth_rate(group_this, group_prev)
+    group_skus = sum(1 for (s, c, sz) in current_by_sku if s in group_styles)
 
-# Overall metrics
-m1, m2, m3 = st.columns(3)
-with m1:
-    delta_str = f"{total_growth:+.1%}" if total_growth is not None else "—"
-    st.metric("Total Units Sold", f"{total_this:,}", delta_str)
-with m2:
-    if prev_agg:
-        st.metric("Previous Week", f"{total_prev:,}")
-    else:
-        st.metric("Previous Week", "—")
-with m3:
-    st.metric("SKUs Tracked", f"{len(current_by_sku)}")
+    if group_this == 0 and group_prev == 0:
+        continue
+
+    st.markdown(
+        f'<h2 style="margin-bottom:0;">'
+        f'{group_name} Update | Week {week_number} ({report_label})</h2>',
+        unsafe_allow_html=True,
+    )
+
+    m1, m2, m3 = st.columns(3)
+    with m1:
+        delta_str = f"{group_growth:+.1%}" if group_growth is not None else "\u2014"
+        st.metric("Units Sold", f"{group_this:,}", delta_str)
+    with m2:
+        st.metric("Previous Week", f"{group_prev:,}" if prev_agg else "\u2014")
+    with m3:
+        st.metric("SKUs Tracked", f"{group_skus}")
+
+    st.markdown("---")
 
 st.markdown("---")
 
@@ -288,13 +298,21 @@ st.subheader("Summary")
 
 bullets = []
 
-# 1. Overall change
-if total_growth is not None:
-    direction = "up" if total_growth > 0 else "down"
-    bullets.append(
-        f"Overall PPL sales **{direction} {abs(total_growth):.0%}** WoW "
-        f"({total_prev:,} → {total_this:,} units)"
-    )
+# 1. Overall change per product group
+for group_name, group_styles in PRODUCT_GROUPS.items():
+    g_this = sum(v for (s, c), v in current_agg.items() if s in group_styles)
+    g_prev = sum(v for (s, c), v in prev_agg.items() if s in group_styles) if prev_agg else 0
+    g_growth = weekly_growth_rate(g_this, g_prev)
+    if g_this == 0 and g_prev == 0:
+        continue
+    if g_growth is not None:
+        direction = "up" if g_growth > 0 else "down"
+        bullets.append(
+            f"Overall {group_name} sales **{direction} {abs(g_growth):.0%}** WoW "
+            f"({g_prev:,} \u2192 {g_this:,} units)"
+        )
+    else:
+        bullets.append(f"Overall {group_name} sales: **{g_this:,}** units (no prior week data)")
 
 # 2. Notable gains
 if notable_gains:
@@ -344,7 +362,7 @@ if warning_sizes:
     warning_labels = [f"{s} {c} {sz} ({d}d)" for s, c, sz, d in warning_sizes[:8]]
     bullets.append(f"\U0001f7e1 **Low stock warning:** {', '.join(warning_labels)}")
 
-# 6. Stock tolerance summary
+# 6. Stock tolerance summary (PPL Black)
 tolerance_notes = []
 for style in STYLES:
     max_g, stock = _stock_tolerance(style, "Black")
@@ -353,15 +371,26 @@ for style in STYLES:
 
 if tolerance_notes:
     bullets.append(
-        "**Stock tolerance (Black):** " + " · ".join(tolerance_notes)
+        "**Stock tolerance (Black):** " + " \u00b7 ".join(tolerance_notes)
     )
 
-# 7. Trend observation
+# 6b. Stock tolerance for Nursing Pillow
+np_max_g, np_stock = _stock_tolerance("Nursing Pillow", "\u2014")
+if np_max_g is not None:
+    bullets.append(f"**Nursing Pillow stock tolerance:** can tolerate **{np_max_g:.0%}** weekly growth")
+
+# 7. Trend observation (PPL)
 trend_notes = []
 for style in STYLES:
     trend = _trend_description(style, "Black")
     if trend:
         trend_notes.append(f"{style} Black {trend}")
+
+# NP trend
+np_trend = _trend_description("Nursing Pillow", "\u2014")
+if np_trend:
+    trend_notes.append(f"Nursing Pillow {np_trend}")
+
 if trend_notes:
     bullets.append("**Trend (last 4 weeks):** " + ", ".join(trend_notes))
 
@@ -415,11 +444,17 @@ def _to_slack(md_text):
     return text
 
 slack_lines = []
-slack_lines.append(f"*PPL Update | Week {week_number} ({report_label})*")
-slack_lines.append("")
+
+for group_name, group_styles in PRODUCT_GROUPS.items():
+    group_this = sum(v for (s, c), v in current_agg.items() if s in group_styles)
+    group_prev = sum(v for (s, c), v in prev_agg.items() if s in group_styles) if prev_agg else 0
+    if group_this == 0 and group_prev == 0:
+        continue
+    slack_lines.append(f"*{group_name} Update | Week {week_number} ({report_label})*")
+    slack_lines.append("")
 
 for b in bullets:
-    slack_lines.append(f"• {_to_slack(b)}")
+    slack_lines.append(f"\u2022 {_to_slack(b)}")
 
 slack_text = "\n".join(slack_lines)
 

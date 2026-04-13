@@ -6,7 +6,7 @@ import json
 import pandas as pd
 from datetime import datetime, timedelta, date
 
-from core.config import STYLES, COLORS, SIZES
+from core.config import ALL_STYLES, ALL_SIZES, get_colors, get_sizes
 from core.database import (
     init_db, get_weekly_sales, get_latest_inventory, get_setting, set_setting,
     get_production_arrivals, get_warehouse_transfers,
@@ -23,7 +23,7 @@ init_db()
 
 page_header("Forecast", "Edit China/US Inbound quantities — stock projections recalculate automatically")
 
-SIZE_ORDER = {s: i for i, s in enumerate(SIZES)}
+SIZE_ORDER = {s: i for i, s in enumerate(ALL_SIZES)}
 
 
 def format_week_range(ws, we):
@@ -358,13 +358,13 @@ def recalculate_forecast(df, current_stocks):
 # ---------------------------------------------------------------------------
 # Style tabs
 # ---------------------------------------------------------------------------
-style_tabs = st.tabs(STYLES)
+style_tabs = st.tabs(ALL_STYLES)
 
-_COLOR_EMOJI = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷"}
+_COLOR_EMOJI = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "—": ""}
 
-for style_idx, style in enumerate(STYLES):
+for style_idx, style in enumerate(ALL_STYLES):
     with style_tabs[style_idx]:
-        colors_to_show = COLORS
+        colors_to_show = get_colors(style)
 
         # Nested color tabs so you always see which color is active
         color_tab_labels = [f"{_COLOR_EMOJI.get(c, '')} {c}" for c in colors_to_show]
@@ -377,7 +377,7 @@ for style_idx, style in enumerate(STYLES):
             current_stocks = {}
             size_forecasts = {}  # {size: rows_list}
 
-            for size in SIZES:
+            for size in get_sizes(style):
                 result = build_initial_forecast(style, color, size)
                 if result is None:
                     continue
@@ -451,7 +451,7 @@ for style_idx, style in enumerate(STYLES):
 
             stockout_sizes_all = []
 
-            for size in SIZES:
+            for size in get_sizes(style):
                 if size not in size_forecasts:
                     continue
 
@@ -477,11 +477,17 @@ for style_idx, style in enumerate(STYLES):
                 # Size group header — includes style+color so it's always visible
                 color_emoji = _COLOR_EMOJI.get(color, "")
                 stock_now = current_stocks.get(size, 0)
+                if color == "—":
+                    header_label = f'<span style="font-weight:700;">{style}</span>'
+                else:
+                    header_label = (
+                        f'<span style="font-weight:700;">{color_emoji} {style} ( {color})</span>'
+                    )
                 st.markdown(
                     f'<div style="background:#F1F5F9;padding:6px 12px;'
                     f'border-left:3px solid #1E40AF;margin-top:12px;margin-bottom:4px;'
                     f'font-size:0.9rem;">'
-                    f'<span style="font-weight:700;">{color_emoji} {style} ( {color})</span>'
+                    f'{header_label}'
                     f' &nbsp;·&nbsp; '
                     f'<span style="font-weight:600;">{size}</span>'
                     f' &nbsp;<span style="font-weight:400;color:#64748B;">'

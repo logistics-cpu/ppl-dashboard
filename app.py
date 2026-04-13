@@ -21,8 +21,8 @@ inject_css()
 # Sidebar
 st.sidebar.markdown(f"""
 <div style="padding: 0.5rem 0;">
-    <h1 style="color:{PRIMARY};font-size:1.3rem;margin:0;">PPL Dashboard</h1>
-    <p style="color:{TEXT_MUTED};font-size:0.8rem;margin:2px 0 0 0;">Postpartum Recovery Leggings</p>
+    <h1 style="color:{PRIMARY};font-size:1.3rem;margin:0;">Sales Dashboard</h1>
+    <p style="color:{TEXT_MUTED};font-size:0.8rem;margin:2px 0 0 0;">PPL &amp; Nursing Pillow</p>
 </div>
 """, unsafe_allow_html=True)
 st.sidebar.divider()
@@ -42,7 +42,7 @@ else:
     st.sidebar.markdown(f'<span style="color:{TEXT_MUTED};font-size:0.85rem;">ERP: No upload</span>', unsafe_allow_html=True)
 
 # Main content
-page_header("PPL Sales Dashboard", "Weekly sales tracking, inventory management, and stockout alerts")
+page_header("Sales Dashboard", "Weekly sales tracking, inventory management, and stockout alerts")
 
 # Quick stats from real data
 inv_rows = get_latest_inventory()
