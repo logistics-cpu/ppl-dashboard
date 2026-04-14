@@ -20,11 +20,11 @@ init_db()
 page_header("Weekly Report", "Auto-generated summary for team updates")
 
 # ---------------------------------------------------------------------------
-# Helper: current week start (Tuesday)
+# Helper: current week start (Monday)
 # ---------------------------------------------------------------------------
 today = date.today()
-days_since_tue = (today.weekday() - 1) % 7
-current_week_start = today - timedelta(days=days_since_tue)
+days_since_mon = today.weekday()
+current_week_start = today - timedelta(days=days_since_mon)
 
 # ---------------------------------------------------------------------------
 # Load data & exclude current incomplete week

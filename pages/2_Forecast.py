@@ -134,10 +134,10 @@ st.markdown("")
 # ---------------------------------------------------------------------------
 
 def _current_week_start_str():
-    """Return the current week's Tuesday as YYYY-MM-DD string."""
+    """Return the current week's Monday as YYYY-MM-DD string."""
     today_ = date.today()
-    days_since_tue = (today_.weekday() - 1) % 7
-    return (today_ - timedelta(days=days_since_tue)).strftime("%Y-%m-%d")
+    days_since_mon = today_.weekday()
+    return (today_ - timedelta(days=days_since_mon)).strftime("%Y-%m-%d")
 
 
 def _completed_sales(style, color, size):
@@ -226,8 +226,8 @@ def get_last_completed_week_end(style, color, size):
     """Return the end date of the last *completed* week with sales data.
     The current incomplete week is excluded so forecast starts from it."""
     today_ = date.today()
-    days_since_tue = (today_.weekday() - 1) % 7
-    current_week_start = today_ - timedelta(days=days_since_tue)
+    days_since_mon = today_.weekday()
+    current_week_start = today_ - timedelta(days=days_since_mon)
     current_week_start_str = current_week_start.strftime("%Y-%m-%d")
 
     size_sales = [

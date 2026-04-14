@@ -205,21 +205,25 @@ with tab_shopify:
 
     # Date range
     from datetime import timedelta
-    yesterday = date.today() - timedelta(days=1)
-    last_week_start = yesterday - timedelta(days=6)
+    today = date.today()
+    # Default to last completed Mon-Sun week
+    days_since_mon = today.weekday()
+    this_monday = today - timedelta(days=days_since_mon)
+    last_monday = this_monday - timedelta(days=7)
+    last_sunday = this_monday - timedelta(days=1)
 
     col1, col2 = st.columns(2)
     with col1:
         sync_start = st.date_input(
             "From date",
-            value=last_week_start,
+            value=last_monday,
             key="sync_start",
             help="Start of the date range to pull sales data for.",
         )
     with col2:
         sync_end = st.date_input(
             "To date",
-            value=yesterday,
+            value=last_sunday,
             key="sync_end",
             help="End of the date range (inclusive).",
         )

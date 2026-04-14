@@ -48,9 +48,9 @@ sel_period = st.selectbox("Period", period_options, index=0, key="trend_period")
 
 
 def _current_week_start():
-    """Return the start date (Tuesday) of the current incomplete week."""
-    days_since_tue = (today.weekday() - 1) % 7
-    return (today - timedelta(days=days_since_tue)).strftime("%Y-%m-%d")
+    """Return the start date (Monday) of the current incomplete week."""
+    days_since_mon = today.weekday()
+    return (today - timedelta(days=days_since_mon)).strftime("%Y-%m-%d")
 
 
 def _exclude_current_week(df):

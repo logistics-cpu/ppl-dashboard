@@ -135,9 +135,9 @@ with f2:
 
 
 def _current_week_start():
-    """Return the start date (Tuesday) of the current incomplete week."""
-    days_since_tue = (today.weekday() - 1) % 7
-    return today - timedelta(days=days_since_tue)
+    """Return the start date (Monday) of the current incomplete week."""
+    days_since_mon = today.weekday()
+    return today - timedelta(days=days_since_mon)
 
 
 def _exclude_current_week(sales_list):

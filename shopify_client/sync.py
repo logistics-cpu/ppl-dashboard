@@ -60,9 +60,9 @@ def _process_orders(edges, weekly_totals):
         utc_dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
         sydney_dt = utc_dt.astimezone(STORE_TZ)
         order_date = sydney_dt.date()
-        # Week starts on Tuesday (weekday() returns 0=Mon, so Tue=1)
-        days_since_tue = (order_date.weekday() - 1) % 7
-        week_start = order_date - timedelta(days=days_since_tue)
+        # Week starts on Monday (weekday() returns 0=Mon)
+        days_since_mon = order_date.weekday()
+        week_start = order_date - timedelta(days=days_since_mon)
         week_end = week_start + timedelta(days=6)
 
         # Count sold items
@@ -87,8 +87,8 @@ def _process_orders(edges, weekly_totals):
                 refund_utc = datetime.fromisoformat(refund_ts.replace("Z", "+00:00"))
                 refund_sydney = refund_utc.astimezone(STORE_TZ)
                 refund_date = refund_sydney.date()
-                r_days_since_tue = (refund_date.weekday() - 1) % 7
-                r_week_start = refund_date - timedelta(days=r_days_since_tue)
+                r_days_since_mon = refund_date.weekday()
+                r_week_start = refund_date - timedelta(days=r_days_since_mon)
                 r_week_end = r_week_start + timedelta(days=6)
             else:
                 # Fallback to order's week if no refund timestamp
