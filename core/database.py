@@ -1,9 +1,34 @@
 """Database schema and CRUD operations — uses Turso (libsql) when configured, else local SQLite."""
 
 import sqlite3
+import time
 from datetime import datetime
 from contextlib import contextmanager
 from core.config import DB_PATH, STYLES, COLORS, SIZES
+
+# ---------------------------------------------------------------------------
+# Simple query cache — avoids repeated HTTP roundtrips to Turso
+# ---------------------------------------------------------------------------
+_query_cache = {}
+_cache_ttl = 30  # seconds
+
+
+def _cache_get(key):
+    """Return cached value if still valid, else None."""
+    entry = _query_cache.get(key)
+    if entry and (time.time() - entry[1]) < _cache_ttl:
+        return entry[0]
+    return None
+
+
+def _cache_set(key, value):
+    """Store value in cache."""
+    _query_cache[key] = (value, time.time())
+
+
+def invalidate_cache():
+    """Clear all cached queries (call after writes)."""
+    _query_cache.clear()
 
 # ---------------------------------------------------------------------------
 # Connection layer — Turso cloud or local SQLite
@@ -326,10 +351,15 @@ def upsert_weekly_sales(style, color, size, week_start, week_end, units_sold, so
             ON CONFLICT(style, color, size, week_start)
             DO UPDATE SET units_sold=excluded.units_sold, source=excluded.source
         """, (style, color, size, week_start, week_end, units_sold, source))
+        invalidate_cache()
 
 
 def get_weekly_sales(style=None, color=None, size=None, start_date=None, end_date=None):
     """Fetch weekly sales records, optionally filtered."""
+    cache_key = ("weekly_sales", style, color, size, start_date, end_date)
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
     query = "SELECT * FROM weekly_sales WHERE 1=1"
     params = []
     if style:
@@ -349,7 +379,9 @@ def get_weekly_sales(style=None, color=None, size=None, start_date=None, end_dat
         params.append(end_date)
     query += " ORDER BY week_start, size"
     with get_db() as conn:
-        return [dict(r) for r in conn.execute(query, params).fetchall()]
+        result = [dict(r) for r in conn.execute(query, params).fetchall()]
+    _cache_set(cache_key, result)
+    return result
 
 
 # --- Inventory Snapshots CRUD ---
@@ -363,10 +395,15 @@ def insert_inventory_snapshot(records):
              sales_7d, sales_28d, sales_42d, days_available, in_transit_qty, snapshot_date)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, records)
+    invalidate_cache()
 
 
 def get_latest_inventory(warehouse=None):
     """Get the most recent inventory snapshot."""
+    cache_key = ("latest_inventory", warehouse)
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
     query = """
         SELECT i.* FROM inventory_snapshots i
         INNER JOIN (
@@ -383,7 +420,9 @@ def get_latest_inventory(warehouse=None):
         params.append(warehouse)
     query += " ORDER BY i.color, i.style, i.size"
     with get_db() as conn:
-        return [dict(r) for r in conn.execute(query, params).fetchall()]
+        result = [dict(r) for r in conn.execute(query, params).fetchall()]
+    _cache_set(cache_key, result)
+    return result
 
 
 # --- Production Arrivals CRUD ---
@@ -463,6 +502,7 @@ def clear_all_data():
         conn.execute("DELETE FROM warehouse_transfers")
         conn.execute("DELETE FROM sync_log")
         conn.commit()
+    invalidate_cache()
 
 
 def get_last_sync(sync_type=None):
