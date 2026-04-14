@@ -11,6 +11,7 @@ from core.database import (
     add_production_arrival, get_production_arrivals, delete_production_arrival,
     add_warehouse_transfer, get_warehouse_transfers, delete_warehouse_transfer,
     upsert_weekly_sales, get_last_sync,
+    clear_all_sales, clear_all_inventory, clear_all_data,
 )
 from erp.parser import parse_erp_excel
 from core.auth import check_password
@@ -169,12 +170,13 @@ st.markdown("""
 # ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
-tab_shopify, tab_erp, tab_arrivals, tab_transfers, tab_settings = st.tabs([
+tab_shopify, tab_erp, tab_arrivals, tab_transfers, tab_settings, tab_danger = st.tabs([
     "Shopify Sync",
     "ERP Upload",
     "Production Arrivals",
     "Warehouse Transfers",
     "Settings",
+    "Clear Data",
 ])
 
 # ─── Shopify Sync ─────────────────────────────────────────────────────────
@@ -711,3 +713,60 @@ with tab_settings:
         set_setting("stockout_threshold_days", new_stockout)
         set_setting("warning_threshold_days", new_warning)
         st.success("Settings saved successfully.")
+
+# ─── Clear Data ──────────────────────────────────────────────────────────
+with tab_danger:
+    st.markdown("""
+    <div class="dm-section">
+        <div class="dm-section-title" style="color:#DC2626;">Clear Data</div>
+        <div class="dm-section-desc">
+            Permanently delete data from the database. This cannot be undone.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown("**Clear Sales Data**")
+        st.caption("Deletes all weekly sales records. You'll need to re-sync Shopify or re-import spreadsheet.")
+        if st.button("Clear Sales Data", key="clear_sales_btn"):
+            st.session_state["confirm_clear"] = "sales"
+
+    with col2:
+        st.markdown("**Clear Inventory Data**")
+        st.caption("Deletes all inventory snapshots. You'll need to re-upload ERP data.")
+        if st.button("Clear Inventory Data", key="clear_inv_btn"):
+            st.session_state["confirm_clear"] = "inventory"
+
+    with col3:
+        st.markdown("**Clear ALL Data**")
+        st.caption("Deletes everything: sales, inventory, arrivals, transfers, and sync logs.")
+        if st.button("Clear ALL Data", key="clear_all_btn"):
+            st.session_state["confirm_clear"] = "all"
+
+    # Confirmation dialog
+    confirm = st.session_state.get("confirm_clear")
+    if confirm:
+        labels = {"sales": "sales data", "inventory": "inventory data", "all": "ALL data"}
+        st.warning(f"Are you sure you want to delete **{labels[confirm]}**? This cannot be undone.")
+        c1, c2, _ = st.columns([1, 1, 4])
+        with c1:
+            if st.button("Yes, delete", type="primary", key="confirm_yes"):
+                if confirm == "sales":
+                    clear_all_sales()
+                    st.success("All sales data cleared.")
+                elif confirm == "inventory":
+                    clear_all_inventory()
+                    st.success("All inventory data cleared.")
+                elif confirm == "all":
+                    clear_all_data()
+                    st.success("All data cleared.")
+                st.session_state.pop("confirm_clear", None)
+                st.rerun()
+        with c2:
+            if st.button("Cancel", key="confirm_cancel"):
+                st.session_state.pop("confirm_clear", None)
+                st.rerun()

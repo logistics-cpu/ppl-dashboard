@@ -433,6 +433,31 @@ def log_sync(sync_type, status, records_synced=0, error_message=None):
         )
 
 
+def clear_all_sales():
+    """Delete ALL weekly sales data."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM weekly_sales")
+        conn.commit()
+
+
+def clear_all_inventory():
+    """Delete ALL inventory snapshots."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM inventory_snapshots")
+        conn.commit()
+
+
+def clear_all_data():
+    """Delete ALL data: sales, inventory, arrivals, transfers, sync logs."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM weekly_sales")
+        conn.execute("DELETE FROM inventory_snapshots")
+        conn.execute("DELETE FROM production_arrivals")
+        conn.execute("DELETE FROM warehouse_transfers")
+        conn.execute("DELETE FROM sync_log")
+        conn.commit()
+
+
 def get_last_sync(sync_type=None):
     query = "SELECT * FROM sync_log"
     params = []
