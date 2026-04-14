@@ -117,7 +117,7 @@ def render_style_charts(style, df):
 
         fig = px.line(
             by_size, x="week_label", y="units", color="size",
-            title=f"Units Sold by Size",
+            title=f"Units Sold by Size — {style} {color}",
             labels={"week_label": "Week", "units": "Units Sold", "size": "Size"},
             category_orders={"size": style_sizes},
             color_discrete_sequence=CHART_COLORS,
@@ -134,7 +134,7 @@ def render_style_charts(style, df):
 
         fig2 = px.area(
             total, x="week_label", y="total",
-            title=f"Total Units Sold per Week",
+            title=f"Total Units Sold per Week — {style} {color}",
             labels={"week_label": "Week", "total": "Total Units"},
             color_discrete_sequence=[CHART_COLORS[0]],
         )
@@ -169,7 +169,7 @@ def render_color_charts(color, df):
 
         fig = px.bar(
             by_style_week, x="week_label", y="units", color="style",
-            title=f"Total Units Sold by Style (All Sizes Combined)",
+            title=f"Total Units Sold by Style — {color} (All Sizes Combined)",
             labels={"week_label": "Week", "units": "Units Sold", "style": "Style"},
             category_orders={"style": ALL_STYLES},
             color_discrete_sequence=CHART_COLORS,
