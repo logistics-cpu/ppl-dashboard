@@ -429,14 +429,14 @@ st.subheader("Copy to Slack")
 import re
 
 def _to_slack(md_text):
-    """Convert markdown bullets to Slack format: no emoji, clean bold markers."""
+    """Convert markdown bullets to Slack format: no emoji, no bold markers."""
     # Remove emoji characters (Unicode emoji ranges)
     text = re.sub(
         r'[\U0001f300-\U0001f9ff\u2600-\u27bf\u26aa\u26ab\U0001f534\U0001f7e1]',
         '', md_text
     )
-    # Convert markdown **bold** to Slack *bold*
-    text = re.sub(r'\*\*(.+?)\*\*', r'*\1*', text)
+    # Remove all bold markers (** from markdown)
+    text = text.replace('**', '')
     # Clean up double spaces from emoji removal
     text = re.sub(r'  +', ' ', text).strip()
     # Remove leading comma+space if emoji removal left one
@@ -450,7 +450,7 @@ for group_name, group_styles in PRODUCT_GROUPS.items():
     group_prev = sum(v for (s, c), v in prev_agg.items() if s in group_styles) if prev_agg else 0
     if group_this == 0 and group_prev == 0:
         continue
-    slack_lines.append(f"*{group_name} Update | Week {week_number} ({report_label})*")
+    slack_lines.append(f"{group_name} Update | Week {week_number} ({report_label})")
     slack_lines.append("")
 
 for b in bullets:
