@@ -148,9 +148,16 @@ def sync_weekly_sales(start_date, end_date):
         )
         _process_orders(edges, weekly_totals)
 
-    # Upsert all weekly records
+    # Upsert all weekly records — skip weeks that start before the requested range
+    from datetime import date as date_cls2
+    req_start = date_cls2.fromisoformat(start_date)
+    # Find the Monday of the requested start date's week
+    req_week_start = req_start - timedelta(days=req_start.weekday())
+
     count = 0
     for (style, color, size, ws, we), units in weekly_totals.items():
+        if date_cls2.fromisoformat(ws) < req_week_start:
+            continue  # Skip weeks before the requested range
         upsert_weekly_sales(style, color, size, ws, we, max(0, units), source="shopify")
         count += 1
 
