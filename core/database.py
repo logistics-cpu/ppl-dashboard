@@ -159,7 +159,12 @@ def get_db():
 # Schema init
 # ---------------------------------------------------------------------------
 
+_db_initialized = False
+
 def init_db():
+    global _db_initialized
+    if _db_initialized:
+        return
     with get_db() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS products (
@@ -244,6 +249,7 @@ def init_db():
         """)
         _seed_products(conn)
         _seed_default_settings(conn)
+    _db_initialized = True
 
 
 def _seed_products(conn):
@@ -323,6 +329,7 @@ def upsert_weekly_sales(style, color, size, week_start, week_end, units_sold, so
 
 
 def get_weekly_sales(style=None, color=None, size=None, start_date=None, end_date=None):
+    """Fetch weekly sales records, optionally filtered."""
     query = "SELECT * FROM weekly_sales WHERE 1=1"
     params = []
     if style:
