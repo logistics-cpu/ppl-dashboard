@@ -413,6 +413,123 @@ with tab_shopify:
         except Exception as e:
             st.error(f"Error reading spreadsheet: {e}")
 
+    st.markdown("---")
+
+    # Shopify CSV import (for historical data beyond API 60-day limit)
+    st.markdown("""
+    <div class="dm-section">
+        <div class="dm-section-title">Shopify CSV Import</div>
+        <div class="dm-section-desc">
+            Import a "Total sales by product" CSV export from Shopify Reports.
+            Use this for historical data that the API can't access (older than 60 days).
+            Each CSV covers one week — set the week dates below.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    csv_file = st.file_uploader(
+        "Upload Shopify CSV",
+        type=["csv"],
+        key="shopify_csv_upload",
+        help="Export from Shopify: Analytics → Reports → Total sales by product",
+    )
+
+    csv_col1, csv_col2 = st.columns(2)
+    with csv_col1:
+        csv_week_start = st.date_input(
+            "Week start (Monday)",
+            value=last_monday,
+            key="csv_week_start",
+            help="The Monday that starts this week (Mon-Sun).",
+        )
+    with csv_col2:
+        csv_week_end = st.date_input(
+            "Week end (Sunday)",
+            value=last_sunday,
+            key="csv_week_end",
+            help="The Sunday that ends this week.",
+        )
+
+    if csv_file:
+        try:
+            import csv
+            import io
+            from core.sku_mapper import parse_shopify_sku
+
+            content = csv_file.read().decode("utf-8")
+            reader = csv.DictReader(io.StringIO(content))
+
+            csv_rows = []
+            skipped_skus = []
+            for row in reader:
+                sku = row.get("Product variant SKU", "").strip().strip('"')
+                units_str = row.get("Net items sold", "0").strip()
+                try:
+                    units = int(float(units_str))
+                except (ValueError, TypeError):
+                    continue
+
+                if units <= 0:
+                    continue
+
+                parsed = parse_shopify_sku(sku)
+                if parsed is None:
+                    skipped_skus.append((sku, units))
+                    continue
+
+                style, color, size = parsed
+                csv_rows.append({
+                    "style": style,
+                    "color": color,
+                    "size": size,
+                    "week_start": csv_week_start.isoformat(),
+                    "week_end": csv_week_end.isoformat(),
+                    "units_sold": units,
+                    "sku": sku,
+                })
+
+            # Aggregate duplicates (same style+color+size can appear from multiple SKUs)
+            from collections import defaultdict
+            agg = defaultdict(int)
+            for r in csv_rows:
+                key = (r["style"], r["color"], r["size"])
+                agg[key] += r["units_sold"]
+
+            agg_rows = [
+                {"Style": s, "Color": c, "Size": sz, "Units Sold": u,
+                 "Week": f"{csv_week_start.strftime('%-m/%-d')}-{csv_week_end.strftime('%-m/%-d')}"}
+                for (s, c, sz), u in sorted(agg.items())
+            ]
+
+            if agg_rows:
+                st.success(f"Parsed **{len(agg_rows)}** SKU records ({sum(r['Units Sold'] for r in agg_rows)} total units)")
+                st.dataframe(pd.DataFrame(agg_rows), use_container_width=True, hide_index=True)
+
+                if skipped_skus:
+                    with st.expander(f"Skipped {len(skipped_skus)} unrecognized SKUs"):
+                        for sku, qty in sorted(skipped_skus, key=lambda x: -x[1]):
+                            st.text(f"  {sku}: {qty} units")
+
+                if st.button("Import CSV Data", type="primary", key="import_shopify_csv"):
+                    count = 0
+                    ws = csv_week_start.isoformat()
+                    we = csv_week_end.isoformat()
+                    for (style, color, size), units in agg.items():
+                        upsert_weekly_sales(style, color, size, ws, we, units, source="shopify")
+                        count += 1
+                    log_sync("shopify_csv", "success", count)
+                    st.success(f"Imported **{count}** records for week {csv_week_start} to {csv_week_end}")
+                    st.rerun()
+            else:
+                st.warning("No recognized PPL or Nursing Pillow SKUs found in the CSV.")
+                if skipped_skus:
+                    with st.expander(f"All {len(skipped_skus)} unrecognized SKUs"):
+                        for sku, qty in sorted(skipped_skus, key=lambda x: -x[1]):
+                            st.text(f"  {sku}: {qty} units")
+
+        except Exception as e:
+            st.error(f"Error reading CSV: {e}")
+
 # ─── ERP Upload ───────────────────────────────────────────────────────────
 with tab_erp:
     st.markdown("""
