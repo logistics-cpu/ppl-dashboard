@@ -223,23 +223,34 @@ def render_color_charts(color, df):
 
 
 # ---------------------------------------------------------------------------
-# Tabs: Long | 7/8 | Short | ⚫ Black | 🫒 Olive Green | 🍷 Burgundy
+# Tabs: Long | 7/8 | Short | ⚫ Black | 🫒 Olive Green | 🍷 Burgundy | Nursing Pillow
 # ---------------------------------------------------------------------------
 st.markdown("")
 color_emoji_map = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "—": ""}
+PPL_STYLES = [s for s in ALL_STYLES if s in ("Long", "7/8", "Short")]
+OTHER_STYLES = [s for s in ALL_STYLES if s not in PPL_STYLES]
 all_colors_seen = []
-for _s in ALL_STYLES:
+for _s in PPL_STYLES:
     for _c in get_colors(_s):
-        if _c not in all_colors_seen:
+        if _c not in all_colors_seen and _c != "—":
             all_colors_seen.append(_c)
-tab_labels = ALL_STYLES + [f"{color_emoji_map.get(c, '')} {c}" for c in all_colors_seen]
+tab_labels = PPL_STYLES + [f"{color_emoji_map.get(c, '')} {c}" for c in all_colors_seen] + OTHER_STYLES
 all_tabs = st.tabs(tab_labels)
 
 df_filtered = filter_by_period(df_all)
 
-# --- Style tabs ---
-for style_idx, style in enumerate(ALL_STYLES):
+# --- Style tabs: PPL at front, others (e.g. Nursing Pillow) at end ---
+for style_idx, style in enumerate(PPL_STYLES):
     with all_tabs[style_idx]:
+        sdf = df_filtered[df_filtered["style"] == style]
+        if sdf.empty:
+            st.info(f"No sales data for {style}.")
+        else:
+            render_style_charts(style, sdf)
+
+for other_idx, style in enumerate(OTHER_STYLES):
+    tab_idx = len(PPL_STYLES) + len(all_colors_seen) + other_idx
+    with all_tabs[tab_idx]:
         sdf = df_filtered[df_filtered["style"] == style]
         if sdf.empty:
             st.info(f"No sales data for {style}.")
@@ -248,7 +259,7 @@ for style_idx, style in enumerate(ALL_STYLES):
 
 # --- Color tabs ---
 for color_idx, color in enumerate(all_colors_seen):
-    with all_tabs[len(ALL_STYLES) + color_idx]:
+    with all_tabs[len(PPL_STYLES) + color_idx]:
         cdf = df_filtered[df_filtered["color"] == color]
         if cdf.empty:
             st.info(f"No sales data for {color}.")

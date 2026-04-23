@@ -343,16 +343,25 @@ def render_sales_table(style, color, color_sales, heading):
 
 
 # ---------------------------------------------------------------------------
-# Tabs: Long | 7/8 | Short | Nursing Pillow | ⚫ Black | 🫒 Olive Green | 🍷 Burgundy
+# Tabs: Long | 7/8 | Short | ⚫ Black | 🫒 Olive Green | 🍷 Burgundy | Nursing Pillow
 # ---------------------------------------------------------------------------
 st.markdown("")
 color_emoji_map = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷"}
-tab_labels = ALL_STYLES + [f"{color_emoji_map.get(c, '')} {c}" for c in COLORS]
+PPL_STYLES = [s for s in ALL_STYLES if s in ("Long", "7/8", "Short")]
+OTHER_STYLES = [s for s in ALL_STYLES if s not in PPL_STYLES]
+tab_labels = PPL_STYLES + [f"{color_emoji_map.get(c, '')} {c}" for c in COLORS] + OTHER_STYLES
 all_tabs = st.tabs(tab_labels)
 
-# --- Style tabs: grouped by color ---
-for style_idx, style in enumerate(ALL_STYLES):
-    with all_tabs[style_idx]:
+# Tab index layout: [PPL styles] [colors] [other styles]
+_style_tab_order = PPL_STYLES + OTHER_STYLES
+
+# --- Style tabs: grouped by color (PPL styles at front, others at back) ---
+for style in _style_tab_order:
+    if style in PPL_STYLES:
+        tab_idx = PPL_STYLES.index(style)
+    else:
+        tab_idx = len(PPL_STYLES) + len(COLORS) + OTHER_STYLES.index(style)
+    with all_tabs[tab_idx]:
         style_colors = get_colors(style)
         style_sales = [r for r in all_sales if r["style"] == style]
 
@@ -382,7 +391,7 @@ for style_idx, style in enumerate(ALL_STYLES):
 
 # --- Color tabs (Black, Olive Green, Burgundy): aggregated by style ---
 for color_idx, color in enumerate(COLORS):
-    with all_tabs[len(ALL_STYLES) + color_idx]:
+    with all_tabs[len(PPL_STYLES) + color_idx]:
         color_sales_all = [r for r in all_sales if r["color"] == color]
         color_sales_all = filter_sales_by_period(color_sales_all)
 
