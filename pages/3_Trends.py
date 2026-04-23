@@ -231,30 +231,17 @@ df_overview = filter_by_period(df_all)
 df_overview = df_overview[df_overview["style"].isin(["Long", "7/8", "Short"])]
 
 if not df_overview.empty:
-    st.markdown("### Overview — PPL Sales by Style, Color, or Size")
+    st.markdown("### Overview — PPL Sales by Color, Size, or Style")
     overview_mode = st.radio(
         "Group by",
-        ["By Style", "By Color", "By Size"],
+        ["By Color", "By Size", "By Style"],
         horizontal=True,
         key="trends_overview_mode",
     )
 
     df_overview["week_label"] = df_overview["week_start"].apply(format_week)
 
-    if overview_mode == "By Style":
-        agg = df_overview.groupby(["week_start", "week_label", "style"]).agg(
-            units=("units_sold", "sum")
-        ).reset_index().sort_values("week_start")
-        fig_ov = px.bar(
-            agg, x="week_label", y="units", color="style",
-            title="PPL Units Sold by Style (All Colors & Sizes)",
-            labels={"week_label": "Week", "units": "Units Sold", "style": "Style"},
-            category_orders={"style": ["Long", "7/8", "Short"]},
-            color_discrete_sequence=CHART_COLORS,
-            barmode="group",
-            text="units",
-        )
-    elif overview_mode == "By Color":
+    if overview_mode == "By Color":
         agg = df_overview.groupby(["week_start", "week_label", "color"]).agg(
             units=("units_sold", "sum")
         ).reset_index().sort_values("week_start")
@@ -267,7 +254,7 @@ if not df_overview.empty:
             barmode="group",
             text="units",
         )
-    else:  # By Size
+    elif overview_mode == "By Size":
         size_order = ["XS", "S", "M", "L", "XL", "2XL", "3XL"]
         agg = df_overview.groupby(["week_start", "week_label", "size"]).agg(
             units=("units_sold", "sum")
@@ -277,6 +264,19 @@ if not df_overview.empty:
             title="PPL Units Sold by Size (All Styles & Colors)",
             labels={"week_label": "Week", "units": "Units Sold", "size": "Size"},
             category_orders={"size": size_order},
+            color_discrete_sequence=CHART_COLORS,
+            barmode="group",
+            text="units",
+        )
+    else:  # By Style
+        agg = df_overview.groupby(["week_start", "week_label", "style"]).agg(
+            units=("units_sold", "sum")
+        ).reset_index().sort_values("week_start")
+        fig_ov = px.bar(
+            agg, x="week_label", y="units", color="style",
+            title="PPL Units Sold by Style (All Colors & Sizes)",
+            labels={"week_label": "Week", "units": "Units Sold", "style": "Style"},
+            category_orders={"style": ["Long", "7/8", "Short"]},
             color_discrete_sequence=CHART_COLORS,
             barmode="group",
             text="units",
