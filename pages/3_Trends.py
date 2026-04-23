@@ -65,7 +65,10 @@ def filter_by_period(df):
         return df
     if sel_period.startswith("Last"):
         num_weeks = int(sel_period.split()[1])
-        cutoff = (today - timedelta(weeks=num_weeks)).strftime("%Y-%m-%d")
+        # Calculate cutoff from the current week's Monday so we get exactly
+        # N completed weeks (not including the current incomplete week).
+        current_week_mon = today - timedelta(days=today.weekday())
+        cutoff = (current_week_mon - timedelta(weeks=num_weeks)).strftime("%Y-%m-%d")
         return df[df["week_start"] >= cutoff]
     try:
         md = datetime.strptime(sel_period, "%B %Y")

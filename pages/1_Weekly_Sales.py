@@ -163,7 +163,9 @@ def filter_sales_by_period(sales_list):
 
     if sel_period.startswith("Last"):
         num_weeks = int(sel_period.split()[1])
-        cutoff = today - timedelta(weeks=num_weeks)
+        # Count back from the current week's Monday so we get exactly
+        # N completed weeks (not including the current incomplete week).
+        cutoff = _current_week_start() - timedelta(weeks=num_weeks)
         cutoff_str = cutoff.strftime("%Y-%m-%d")
         return [r for r in _exclude_current_week(sales_list) if str(r["week_start"]) >= cutoff_str]
 
