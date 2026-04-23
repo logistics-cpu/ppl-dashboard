@@ -223,6 +223,59 @@ def render_color_charts(color, df):
 
 
 # ---------------------------------------------------------------------------
+# Overview: sales by color OR by size (regardless of the other)
+# ---------------------------------------------------------------------------
+df_overview = filter_by_period(df_all)
+
+# Exclude Nursing Pillow (different color/size dimensions) from this overview
+df_overview = df_overview[df_overview["style"].isin(["Long", "7/8", "Short"])]
+
+if not df_overview.empty:
+    st.markdown("### Overview — PPL Sales by Color or Size")
+    overview_mode = st.radio(
+        "Group by",
+        ["By Color", "By Size"],
+        horizontal=True,
+        key="trends_overview_mode",
+    )
+
+    df_overview["week_label"] = df_overview["week_start"].apply(format_week)
+
+    if overview_mode == "By Color":
+        agg = df_overview.groupby(["week_start", "week_label", "color"]).agg(
+            units=("units_sold", "sum")
+        ).reset_index().sort_values("week_start")
+        fig_ov = px.bar(
+            agg, x="week_label", y="units", color="color",
+            title="PPL Units Sold by Color (All Styles & Sizes)",
+            labels={"week_label": "Week", "units": "Units Sold", "color": "Color"},
+            category_orders={"color": ["Black", "Olive Green", "Burgundy"]},
+            color_discrete_map={"Black": "#1F2937", "Olive Green": "#708238", "Burgundy": "#800020"},
+            barmode="group",
+            text="units",
+        )
+    else:  # By Size
+        size_order = ["XS", "S", "M", "L", "XL", "2XL", "3XL"]
+        agg = df_overview.groupby(["week_start", "week_label", "size"]).agg(
+            units=("units_sold", "sum")
+        ).reset_index().sort_values("week_start")
+        fig_ov = px.bar(
+            agg, x="week_label", y="units", color="size",
+            title="PPL Units Sold by Size (All Styles & Colors)",
+            labels={"week_label": "Week", "units": "Units Sold", "size": "Size"},
+            category_orders={"size": size_order},
+            color_discrete_sequence=CHART_COLORS,
+            barmode="group",
+            text="units",
+        )
+
+    fig_ov.update_traces(marker_line_width=0, opacity=0.9, textposition="outside")
+    fig_ov.update_layout(**PLOTLY_LAYOUT, hovermode="x unified")
+    st.plotly_chart(fig_ov, use_container_width=True, key=f"overview_{overview_mode}")
+    st.markdown("---")
+
+
+# ---------------------------------------------------------------------------
 # Tabs: Long | 7/8 | Short | ⚫ Black | 🫒 Olive Green | 🍷 Burgundy | Nursing Pillow
 # ---------------------------------------------------------------------------
 st.markdown("")
