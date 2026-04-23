@@ -132,19 +132,16 @@ def render_style_charts(style, df):
             total=("units_sold", "sum")
         ).reset_index().sort_values("week_start")
 
-        fig2 = px.area(
+        fig2 = px.bar(
             total, x="week_label", y="total",
             title=f"Total Units Sold per Week — {style} {color}",
             labels={"week_label": "Week", "total": "Total Units"},
             color_discrete_sequence=[CHART_COLORS[0]],
+            text="total",
         )
-        fig2.update_traces(
-            fill="tozeroy",
-            fillcolor="rgba(30,64,175,0.12)",
-            line=dict(width=2.5, color=CHART_COLORS[0]),
-        )
+        fig2.update_traces(marker_line_width=0, opacity=0.9, textposition="outside")
         fig2.update_layout(**PLOTLY_LAYOUT)
-        st.plotly_chart(fig2, use_container_width=True, key=f"area_{uid}")
+        st.plotly_chart(fig2, use_container_width=True, key=f"bar_total_{uid}")
 
         st.markdown("---")
 
@@ -185,19 +182,16 @@ def render_color_charts(color, df):
         ).reset_index().sort_values("week_start")
         total["week_label"] = total["week_start"].apply(format_week)
 
-        fig2 = px.area(
+        fig2 = px.bar(
             total, x="week_label", y="total",
             title=f"Total {color} Units Sold per Week (All Styles)",
             labels={"week_label": "Week", "total": "Total Units"},
             color_discrete_sequence=[CHART_COLORS[0]],
+            text="total",
         )
-        fig2.update_traces(
-            fill="tozeroy",
-            fillcolor="rgba(30,64,175,0.12)",
-            line=dict(width=2.5, color=CHART_COLORS[0]),
-        )
+        fig2.update_traces(marker_line_width=0, opacity=0.9, textposition="outside")
         fig2.update_layout(**PLOTLY_LAYOUT)
-        st.plotly_chart(fig2, use_container_width=True, key=f"carea_all_{cuid}")
+        st.plotly_chart(fig2, use_container_width=True, key=f"cbar_all_{cuid}")
 
         st.markdown("---")
 
