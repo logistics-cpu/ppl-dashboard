@@ -194,7 +194,7 @@ def render_color_charts(color, df):
         )
         fig2.update_traces(marker_line_width=0, opacity=0.9, textposition="outside")
         fig2.update_layout(**PLOTLY_LAYOUT)
-        st.plotly_chart(fig2, use_container_width=True, key=f"cbar_all_{cuid}")
+        st.plotly_chart(fig2, use_container_width=True, key=f"cbar_total_{cuid}")
 
         st.markdown("---")
 
