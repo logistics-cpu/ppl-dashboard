@@ -26,13 +26,15 @@ CHART_COLORS = ["#1E40AF", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899"
 
 PLOTLY_LAYOUT = dict(
     font=dict(family="Inter, system-ui, sans-serif", color=TEXT),
-    paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(0,0,0,0)",
+    title=dict(font=dict(color=TEXT, size=16)),
+    paper_bgcolor="white",
+    plot_bgcolor="white",
     margin=dict(l=40, r=20, t=50, b=40),
     hoverlabel=dict(bgcolor="white", font_size=13, bordercolor=BORDER),
     colorway=CHART_COLORS,
-    xaxis=dict(gridcolor="#F1F5F9", zerolinecolor="#E2E8F0"),
-    yaxis=dict(gridcolor="#F1F5F9", zerolinecolor="#E2E8F0"),
+    xaxis=dict(gridcolor="#F1F5F9", zerolinecolor="#E2E8F0", color=TEXT),
+    yaxis=dict(gridcolor="#F1F5F9", zerolinecolor="#E2E8F0", color=TEXT),
+    legend=dict(font=dict(color=TEXT)),
 )
 
 
