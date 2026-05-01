@@ -29,6 +29,7 @@ SHOPIFY_API_VERSION = _get_config("SHOPIFY_API_VERSION", "2025-10")
 PRODUCT_GROUPS = {
     "PPL": ["Long", "7/8", "Short"],
     "Nursing Pillow": ["Nursing Pillow"],
+    "Hydration": ["Hydration"],
 }
 
 STYLE_CONFIG = {
@@ -36,6 +37,7 @@ STYLE_CONFIG = {
     "7/8":            {"colors": ["Black", "Olive Green", "Burgundy"], "sizes": ["XS", "S", "M", "L", "XL", "2XL", "3XL"]},
     "Short":          {"colors": ["Black", "Olive Green", "Burgundy"], "sizes": ["XS", "S", "M", "L", "XL", "2XL", "3XL"]},
     "Nursing Pillow": {"colors": ["\u2014"], "sizes": ["Large", "Set"]},
+    "Hydration":      {"colors": ["\u2014"], "sizes": ["Passionfruit Orange", "Lemonade", "Lemon Lime", "Variety Pack 15", "Variety Pack 30"]},
 }
 
 ALL_STYLES = list(STYLE_CONFIG.keys())
@@ -112,6 +114,24 @@ SHOPIFY_COLOR_MAP = {
 NP_SKU_MAP = {
     "J11268-breastfeeding-pillow-Large": ("Nursing Pillow", "\u2014", "Large"),
     "J11268-breastfeeding-pillow-Set":   ("Nursing Pillow", "\u2014", "Set"),
+}
+
+# Hydration SKU mapping (exact-match)
+# Shopify SKUs use "bph-*" prefix; ERP SKUs use "J27385-*" prefix.
+# The bare "bph" SKU is ignored (error SKU per business rules).
+HYDRATION_SKU_MAP = {
+    # Shopify
+    "bph-passionfruitorange": ("Hydration", "\u2014", "Passionfruit Orange"),
+    "bph-lemonade":           ("Hydration", "\u2014", "Lemonade"),
+    "bph-lemonandlime":       ("Hydration", "\u2014", "Lemon Lime"),
+    "bph-variety15":          ("Hydration", "\u2014", "Variety Pack 15"),
+    "bph-variety30":          ("Hydration", "\u2014", "Variety Pack 30"),
+    # ERP
+    "J27385-orange":          ("Hydration", "\u2014", "Passionfruit Orange"),
+    "J27385-lemonade":        ("Hydration", "\u2014", "Lemonade"),
+    "J27385-lemolime":        ("Hydration", "\u2014", "Lemon Lime"),
+    "J27385-mix":             ("Hydration", "\u2014", "Variety Pack 15"),
+    "J27385-mix-30":          ("Hydration", "\u2014", "Variety Pack 30"),
 }
 
 # Default settings

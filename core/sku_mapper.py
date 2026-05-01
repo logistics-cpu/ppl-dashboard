@@ -3,7 +3,7 @@
 import re
 from core.config import (
     SHOPIFY_STYLE_MAP, SHOPIFY_COLOR_MAP,
-    ERP_SKU_REVERSE, SIZES, NP_SKU_MAP,
+    ERP_SKU_REVERSE, SIZES, NP_SKU_MAP, HYDRATION_SKU_MAP,
 )
 
 
@@ -31,6 +31,11 @@ def parse_shopify_sku(sku):
     np_result = NP_SKU_MAP.get(sku)
     if np_result:
         return np_result
+
+    # --- Hydration (exact match) ---
+    hyd_result = HYDRATION_SKU_MAP.get(sku)
+    if hyd_result:
+        return hyd_result
 
     # --- PPL patterns ---
 
@@ -84,6 +89,11 @@ def parse_erp_sku(sku):
     np_result = NP_SKU_MAP.get(sku)
     if np_result:
         return np_result
+
+    # --- Hydration (exact match) ---
+    hyd_result = HYDRATION_SKU_MAP.get(sku)
+    if hyd_result:
+        return hyd_result
 
     # --- PPL patterns ---
     # Try each known prefix pattern (longest match first to avoid partial matches)
