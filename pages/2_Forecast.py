@@ -318,8 +318,14 @@ def recalculate_forecast(df, current_stocks):
         size = row["Size"]
         demand_daily = row["Proj. Daily Demand"]
         weekly_demand = round(demand_daily * 7)
-        china_in = int(row["China Inbound"]) if row["China Inbound"] else 0
-        us_in = int(row["US Inbound"]) if row["US Inbound"] else 0
+        try:
+            china_in = int(row["China Inbound"]) if pd.notna(row["China Inbound"]) else 0
+        except (ValueError, TypeError):
+            china_in = 0
+        try:
+            us_in = int(row["US Inbound"]) if pd.notna(row["US Inbound"]) else 0
+        except (ValueError, TypeError):
+            us_in = 0
         total_inbound = china_in + us_in
 
         opening = stock_by_size.get(size, 0)
