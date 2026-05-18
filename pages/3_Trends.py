@@ -299,6 +299,40 @@ if not df_overview.empty:
 
 
 # ---------------------------------------------------------------------------
+# Hydration overview — units sold by flavor
+# ---------------------------------------------------------------------------
+df_hydration = filter_by_period(df_all)
+df_hydration = df_hydration[df_hydration["style"] == "Hydration"]
+
+if not df_hydration.empty:
+    st.markdown("### Overview — Hydration Sales by Flavor")
+    df_hydration["week_label"] = df_hydration["week_start"].apply(format_week)
+    flavor_order = ["Passionfruit Orange", "Lemonade", "Lemon Lime", "Variety Pack 15", "Variety Pack 30"]
+    agg_hyd = df_hydration.groupby(["week_start", "week_label", "size"]).agg(
+        units=("units_sold", "sum")
+    ).reset_index().sort_values("week_start")
+    fig_hyd = px.bar(
+        agg_hyd, x="week_label", y="units", color="size",
+        title="Hydration Units Sold by Flavor",
+        labels={"week_label": "Week", "units": "Units Sold", "size": "Flavor"},
+        category_orders={"size": flavor_order},
+        color_discrete_map={
+            "Passionfruit Orange": "#F97316",
+            "Lemonade": "#EAB308",
+            "Lemon Lime": "#84CC16",
+            "Variety Pack 15": "#06B6D4",
+            "Variety Pack 30": "#8B5CF6",
+        },
+        barmode="group",
+        text="units",
+    )
+    fig_hyd.update_traces(marker_line_width=0, opacity=0.9, textposition="outside")
+    fig_hyd.update_layout(**PLOTLY_LAYOUT, hovermode="x unified")
+    st.plotly_chart(fig_hyd, use_container_width=True, key="overview_hydration_flavor")
+    st.markdown("---")
+
+
+# ---------------------------------------------------------------------------
 # Tabs: Long | 7/8 | Short | ⚫ Black | 🫒 Olive Green | 🍷 Burgundy | Nursing Pillow
 # ---------------------------------------------------------------------------
 st.markdown("")
