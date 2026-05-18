@@ -108,10 +108,13 @@ def render_style_charts(style, df):
     for color in colors_in_data:
         color_emoji = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "—": ""}.get(color, "")
         uid = f"{style}_{color}".replace(" ", "_").replace("/", "")
-        # For products without colors (e.g., Hydration), don't show "—" in titles
+        # For products without colors (e.g., Hydration, Nursing Pillow), don't show "—"
         is_no_color = color == "—"
+        # Per-style labels for what "size" actually means
+        size_label_map = {"Hydration": ("Flavor", "All Flavors"), "Nursing Pillow": ("Variant", "All Variants")}
+        size_axis_label, all_suffix = size_label_map.get(style, ("Size", "All Sizes"))
         section_label = style if is_no_color else f"{style} ( {color})"
-        title_suffix = f"{style} (All Flavors)" if is_no_color else f"{style} {color}"
+        title_suffix = f"{style} ({all_suffix})" if is_no_color else f"{style} {color}"
         st.markdown(f"#### {color_emoji} {section_label}".strip())
 
         cdf = df[df["color"] == color].copy()
@@ -122,7 +125,6 @@ def render_style_charts(style, df):
             units=("units_sold", "sum")
         ).reset_index().sort_values("week_start")
 
-        size_axis_label = "Flavor" if is_no_color else "Size"
         fig = px.line(
             by_size, x="week_label", y="units", color="size",
             title=f"Units Sold by {size_axis_label} — {title_suffix}",
