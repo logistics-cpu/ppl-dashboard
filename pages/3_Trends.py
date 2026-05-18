@@ -307,7 +307,7 @@ df_hydration = df_hydration[df_hydration["style"] == "Hydration"]
 if not df_hydration.empty:
     st.markdown("### Overview — Hydration Sales by Flavor")
     df_hydration["week_label"] = df_hydration["week_start"].apply(format_week)
-    flavor_order = ["Passionfruit Orange", "Lemonade", "Lemon Lime", "Variety Pack 15", "Variety Pack 30"]
+    flavor_order = ["Variety Pack 15", "Variety Pack 30", "Passionfruit Orange", "Lemonade", "Lemon Lime"]
     agg_hyd = df_hydration.groupby(["week_start", "week_label", "size"]).agg(
         units=("units_sold", "sum")
     ).reset_index().sort_values("week_start")
