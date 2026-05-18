@@ -108,7 +108,11 @@ def render_style_charts(style, df):
     for color in colors_in_data:
         color_emoji = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "—": ""}.get(color, "")
         uid = f"{style}_{color}".replace(" ", "_").replace("/", "")
-        st.markdown(f"#### {color_emoji} {style} ( {color})")
+        # For products without colors (e.g., Hydration), don't show "—" in titles
+        is_no_color = color == "—"
+        section_label = style if is_no_color else f"{style} ( {color})"
+        title_suffix = f"{style} (All Flavors)" if is_no_color else f"{style} {color}"
+        st.markdown(f"#### {color_emoji} {section_label}".strip())
 
         cdf = df[df["color"] == color].copy()
         cdf["week_label"] = cdf["week_start"].apply(format_week)
@@ -118,10 +122,11 @@ def render_style_charts(style, df):
             units=("units_sold", "sum")
         ).reset_index().sort_values("week_start")
 
+        size_axis_label = "Flavor" if is_no_color else "Size"
         fig = px.line(
             by_size, x="week_label", y="units", color="size",
-            title=f"Units Sold by Size — {style} {color}",
-            labels={"week_label": "Week", "units": "Units Sold", "size": "Size"},
+            title=f"Units Sold by {size_axis_label} — {title_suffix}",
+            labels={"week_label": "Week", "units": "Units Sold", "size": size_axis_label},
             category_orders={"size": style_sizes},
             color_discrete_sequence=CHART_COLORS,
             markers=True,
@@ -137,7 +142,7 @@ def render_style_charts(style, df):
 
         fig2 = px.bar(
             total, x="week_label", y="total",
-            title=f"Total Units Sold per Week — {style} {color}",
+            title=f"Total Units Sold per Week — {title_suffix}",
             labels={"week_label": "Week", "total": "Total Units"},
             color_discrete_sequence=[CHART_COLORS[0]],
             text="total",
