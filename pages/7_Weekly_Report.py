@@ -130,7 +130,7 @@ for r in all_inv:
 # ---------------------------------------------------------------------------
 # Compute metrics for report
 # ---------------------------------------------------------------------------
-_COLOR_EMOJI = {"Black": "\u26ab", "Olive Green": "\U0001f9c0", "Burgundy": "\U0001f377", "\u2014": ""}
+_COLOR_EMOJI = {"Black": "\u26ab", "Olive Green": "\U0001f9c0", "Burgundy": "\U0001f377", "Navy": "\U0001f535", "\u2014": ""}
 
 # Total units this week vs last
 total_this = sum(current_agg.values())

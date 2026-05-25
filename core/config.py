@@ -33,9 +33,9 @@ PRODUCT_GROUPS = {
 }
 
 STYLE_CONFIG = {
-    "Long":           {"colors": ["Black", "Olive Green", "Burgundy"], "sizes": ["XS", "S", "M", "L", "XL", "2XL", "3XL"]},
-    "7/8":            {"colors": ["Black", "Olive Green", "Burgundy"], "sizes": ["XS", "S", "M", "L", "XL", "2XL", "3XL"]},
-    "Short":          {"colors": ["Black", "Olive Green", "Burgundy"], "sizes": ["XS", "S", "M", "L", "XL", "2XL", "3XL"]},
+    "Long":           {"colors": ["Black", "Olive Green", "Burgundy", "Navy"], "sizes": ["XS", "S", "M", "L", "XL", "2XL", "3XL"]},
+    "7/8":            {"colors": ["Black", "Olive Green", "Burgundy", "Navy"], "sizes": ["XS", "S", "M", "L", "XL", "2XL", "3XL"]},
+    "Short":          {"colors": ["Black", "Olive Green", "Burgundy", "Navy"], "sizes": ["XS", "S", "M", "L", "XL", "2XL", "3XL"]},
     "Nursing Pillow": {"colors": ["\u2014"], "sizes": ["Large", "Set"]},
     "Hydration":      {"colors": ["\u2014"], "sizes": ["Passionfruit Orange", "Lemonade", "Lemon Lime", "Variety Pack 15", "Variety Pack 30"]},
 }
@@ -62,7 +62,7 @@ for _cfg in STYLE_CONFIG.values():
 
 # PPL-only aliases (backward compatibility)
 STYLES = ["Long", "7/8", "Short"]
-COLORS = ["Black", "Olive Green", "Burgundy"]
+COLORS = ["Black", "Olive Green", "Burgundy", "Navy"]
 SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL"]
 
 # Warehouses (ERP names → display names)
@@ -88,6 +88,9 @@ ERP_SKU_MAP = {
     ("Burgundy", "Long"):  ("136181", "wine", "high"),
     ("Burgundy", "7/8"):   ("136181", "wine", "high7"),
     ("Burgundy", "Short"): ("136181", "wine", "highshort"),
+    ("Navy", "Long"):  ("136181", "navy", "high"),
+    ("Navy", "7/8"):   ("136181", "navy", "high7"),
+    ("Navy", "Short"): ("136181", "navy", "highshort"),
 }
 
 # Reverse map: ERP SKU prefix → (color, style)
@@ -108,6 +111,8 @@ SHOPIFY_COLOR_MAP = {
     "green": "Olive Green",
     "burgundy": "Burgundy",
     "red": "Burgundy",
+    "navy": "Navy",
+    "blue": "Navy",
 }
 
 # Nursing Pillow SKU mapping (exact-match, same for Shopify and ERP)

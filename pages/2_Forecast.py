@@ -366,7 +366,7 @@ def recalculate_forecast(df, current_stocks):
 # ---------------------------------------------------------------------------
 style_tabs = st.tabs(ALL_STYLES)
 
-_COLOR_EMOJI = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "—": ""}
+_COLOR_EMOJI = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "Navy": "🔵", "—": ""}
 
 for style_idx, style in enumerate(ALL_STYLES):
     with style_tabs[style_idx]:

@@ -194,7 +194,7 @@ def _week_in_month(week_start, year, month):
 # ---------------------------------------------------------------------------
 # Helper: build and render a sales table for a given style + color combo
 # ---------------------------------------------------------------------------
-_COLOR_EMOJI = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "—": ""}
+_COLOR_EMOJI = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "Navy": "🔵", "—": ""}
 
 
 def render_sales_table(style, color, color_sales, heading):
@@ -348,7 +348,7 @@ def render_sales_table(style, color, color_sales, heading):
 # Tabs: Long | 7/8 | Short | ⚫ Black | 🫒 Olive Green | 🍷 Burgundy | Nursing Pillow
 # ---------------------------------------------------------------------------
 st.markdown("")
-color_emoji_map = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷"}
+color_emoji_map = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "Navy": "🔵"}
 PPL_STYLES = [s for s in ALL_STYLES if s in ("Long", "7/8", "Short")]
 OTHER_STYLES = [s for s in ALL_STYLES if s not in PPL_STYLES]
 tab_labels = PPL_STYLES + [f"{color_emoji_map.get(c, '')} {c}" for c in COLORS] + OTHER_STYLES

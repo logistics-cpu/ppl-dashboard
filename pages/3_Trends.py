@@ -106,7 +106,7 @@ def render_style_charts(style, df):
     colors_in_data = [c for c in style_colors if c in df["color"].values]
 
     for color in colors_in_data:
-        color_emoji = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "—": ""}.get(color, "")
+        color_emoji = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "Navy": "🔵", "—": ""}.get(color, "")
         uid = f"{style}_{color}".replace(" ", "_").replace("/", "")
         # For products without colors (e.g., Hydration, Nursing Pillow), don't show "—"
         is_no_color = color == "—"
@@ -161,7 +161,7 @@ def render_style_charts(style, df):
 # ---------------------------------------------------------------------------
 def render_color_charts(color, df):
     """Show aggregated units (all sizes summed) per style for a color tab."""
-    color_emoji = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "—": ""}.get(color, "")
+    color_emoji = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "Navy": "🔵", "—": ""}.get(color, "")
 
     # Stacked bar: all styles on one chart
     by_style_week = df.groupby(["week_start", "style"]).agg(
@@ -336,7 +336,7 @@ if not df_hydration.empty:
 # Tabs: Long | 7/8 | Short | ⚫ Black | 🫒 Olive Green | 🍷 Burgundy | Nursing Pillow
 # ---------------------------------------------------------------------------
 st.markdown("")
-color_emoji_map = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "—": ""}
+color_emoji_map = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "Navy": "🔵", "—": ""}
 PPL_STYLES = [s for s in ALL_STYLES if s in ("Long", "7/8", "Short")]
 OTHER_STYLES = [s for s in ALL_STYLES if s not in PPL_STYLES]
 all_colors_seen = []
