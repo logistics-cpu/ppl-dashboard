@@ -259,8 +259,8 @@ if not df_overview.empty:
             agg, x="week_label", y="units", color="color",
             title="PPL Units Sold by Color (All Styles & Sizes)",
             labels={"week_label": "Week", "units": "Units Sold", "color": "Color"},
-            category_orders={"color": ["Black", "Olive Green", "Burgundy"]},
-            color_discrete_map={"Black": "#1F2937", "Olive Green": "#708238", "Burgundy": "#800020"},
+            category_orders={"color": ["Black", "Olive Green", "Burgundy", "Navy"]},
+            color_discrete_map={"Black": "#1F2937", "Olive Green": "#708238", "Burgundy": "#800020", "Navy": "#1E3A8A"},
             barmode="group",
             text="units",
         )
