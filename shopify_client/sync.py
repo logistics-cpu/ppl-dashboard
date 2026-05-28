@@ -6,7 +6,10 @@ import pytz
 from shopify_client.client import ShopifyClient
 from shopify_client.queries import PRODUCTS_QUERY, ORDERS_QUERY
 from core.sku_mapper import parse_shopify_sku
-from core.database import upsert_weekly_sales, get_db
+from core.database import (
+    upsert_weekly_sales, get_db,
+    upsert_raw_weekly_sales, derive_weekly_sales_from_raw,
+)
 
 # Shopify store timezone — Sydney observes AEDT (UTC+11) Oct-Apr, AEST (UTC+10) Apr-Oct
 STORE_TZ = pytz.timezone("Australia/Sydney")
@@ -50,8 +53,13 @@ def sync_products():
     return mapped
 
 
-def _process_orders(edges, weekly_totals):
-    """Process order edges and accumulate into weekly_totals dict."""
+def _process_orders(edges, raw_totals):
+    """
+    Process order edges and accumulate net units (sold - refunded) by raw SKU.
+
+    raw_totals: dict[(shopify_sku, week_start_iso, week_end_iso)] -> int net units
+    No SKU filtering happens here — every SKU with non-empty value is captured.
+    """
     for edge in edges:
         order = edge["node"]
         # Shopify reports use processedAt (when payment was captured), not createdAt.
@@ -65,19 +73,15 @@ def _process_orders(edges, weekly_totals):
         week_start = order_date - timedelta(days=days_since_mon)
         week_end = week_start + timedelta(days=6)
 
-        # Count sold items
+        # Count sold items (any non-empty SKU)
         for item_edge in order["lineItems"]["edges"]:
             item = item_edge["node"]
-            sku = item.get("sku", "")
+            sku = (item.get("sku") or "").strip()
             qty = item.get("quantity", 0)
-
-            parsed = parse_shopify_sku(sku)
-            if parsed is None:
+            if not sku:
                 continue
-
-            style, color, size = parsed
-            key = (style, color, size, week_start.isoformat(), week_end.isoformat())
-            weekly_totals[key] += qty
+            key = (sku, week_start.isoformat(), week_end.isoformat())
+            raw_totals[key] += qty
 
         # Subtract refunded items — attribute to the REFUND's week (not order's week)
         # to match Shopify's "Net items sold" report behavior.
@@ -97,16 +101,12 @@ def _process_orders(edges, weekly_totals):
 
             for rli_edge in refund.get("refundLineItems", {}).get("edges", []):
                 rli = rli_edge["node"]
-                refund_sku = rli.get("lineItem", {}).get("sku", "")
+                refund_sku = (rli.get("lineItem", {}).get("sku") or "").strip()
                 refund_qty = rli.get("quantity", 0)
-
-                parsed = parse_shopify_sku(refund_sku)
-                if parsed is None:
+                if not refund_sku:
                     continue
-
-                style, color, size = parsed
-                key = (style, color, size, r_week_start.isoformat(), r_week_end.isoformat())
-                weekly_totals[key] -= refund_qty
+                key = (refund_sku, r_week_start.isoformat(), r_week_end.isoformat())
+                raw_totals[key] -= refund_qty
 
 
 def sync_weekly_sales(start_date, end_date):
@@ -125,8 +125,8 @@ def sync_weekly_sales(start_date, end_date):
     """
     client = ShopifyClient()
 
-    # Aggregate: (style, color, size, week_start) → total net units
-    weekly_totals = defaultdict(int)
+    # Aggregate: (shopify_sku, week_start, week_end) → net units (NO SKU FILTERING)
+    raw_totals = defaultdict(int)
 
     # Three-pass approach to match Shopify's "Net items sold" report exactly:
     #   Pass 1: financial_status:paid — fully paid orders
@@ -146,19 +146,23 @@ def sync_weekly_sales(start_date, end_date):
             path_to_edges="orders.edges",
             path_to_page_info="orders.pageInfo",
         )
-        _process_orders(edges, weekly_totals)
+        _process_orders(edges, raw_totals)
 
-    # Upsert all weekly records — skip weeks that start before the requested range
+    # Step 1: write ALL raw SKU data — including unmapped products.
+    # This makes future product additions backfill instantly from raw data.
     from datetime import date as date_cls2
     req_start = date_cls2.fromisoformat(start_date)
-    # Find the Monday of the requested start date's week
-    req_week_start = req_start - timedelta(days=req_start.weekday())
+    req_week_start = req_start - timedelta(days=req_start.weekday())  # Monday of req start
 
-    count = 0
-    for (style, color, size, ws, we), units in weekly_totals.items():
+    raw_count = 0
+    for (sku, ws, we), units in raw_totals.items():
         if date_cls2.fromisoformat(ws) < req_week_start:
             continue  # Skip weeks before the requested range
-        upsert_weekly_sales(style, color, size, ws, we, max(0, units), source="shopify")
-        count += 1
+        upsert_raw_weekly_sales(sku, ws, we, max(0, units), source="shopify")
+        raw_count += 1
 
-    return count
+    # Step 2: derive weekly_sales from raw data using current SKU mappings.
+    # Unmapped SKUs stay in raw_weekly_sales for the SKU Discovery panel.
+    derive_weekly_sales_from_raw(start_date=req_week_start.isoformat(), end_date=end_date)
+
+    return raw_count

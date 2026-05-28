@@ -12,6 +12,7 @@ from core.database import (
     add_warehouse_transfer, get_warehouse_transfers, delete_warehouse_transfer,
     upsert_weekly_sales, get_last_sync,
     clear_all_sales, clear_all_inventory, clear_all_data,
+    get_unmapped_raw_skus, derive_weekly_sales_from_raw,
 )
 from erp.parser import parse_erp_excel
 from core.auth import check_password
@@ -170,8 +171,9 @@ st.markdown("""
 # ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
-tab_shopify, tab_erp, tab_arrivals, tab_transfers, tab_settings, tab_danger = st.tabs([
+tab_shopify, tab_discovery, tab_erp, tab_arrivals, tab_transfers, tab_settings, tab_danger = st.tabs([
     "Shopify Sync",
+    "SKU Discovery",
     "ERP Upload",
     "Production Arrivals",
     "Warehouse Transfers",
@@ -529,6 +531,78 @@ with tab_shopify:
 
         except Exception as e:
             st.error(f"Error reading CSV: {e}")
+
+# ─── SKU Discovery ────────────────────────────────────────────────────────
+with tab_discovery:
+    st.markdown("""
+    <div class="dm-section">
+        <div class="dm-section-title">SKU Discovery</div>
+        <div class="dm-section-desc">
+            Unmapped Shopify SKUs from your sales data, sorted by volume.
+            Use this to find new products worth tracking — give the SKU pattern
+            to your developer to add to the dashboard.
+            <br><br>
+            After adding new SKU mappings in the code, click <b>Re-derive sales</b>
+            below to backfill historical data without re-syncing Shopify.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    disc_col1, disc_col2 = st.columns([1, 1])
+    with disc_col1:
+        disc_lookback = st.selectbox(
+            "Show SKUs sold in last",
+            options=[("4 weeks", 28), ("12 weeks", 84), ("26 weeks", 182), ("All time", None)],
+            format_func=lambda x: x[0],
+            index=1,
+            key="disc_lookback",
+        )
+    with disc_col2:
+        disc_limit = st.selectbox(
+            "Max SKUs to show",
+            options=[20, 50, 100, 200],
+            index=1,
+            key="disc_limit",
+        )
+
+    # Compute date range
+    from datetime import date as _disc_date, timedelta as _disc_td
+    disc_end = _disc_date.today()
+    disc_days = disc_lookback[1]
+    disc_start = (disc_end - _disc_td(days=disc_days)).isoformat() if disc_days else None
+
+    unmapped = get_unmapped_raw_skus(start_date=disc_start, limit=disc_limit)
+
+    if unmapped:
+        st.warning(f"Found **{len(unmapped)}** unmapped SKUs with sales in this range")
+        disc_df = pd.DataFrame([
+            {
+                "Shopify SKU": r["shopify_sku"],
+                "Total Units": r["total_units"],
+                "Weeks Active": r["weeks_seen"],
+                "Last Sale Week": r["last_week"],
+            }
+            for r in unmapped
+        ])
+        st.dataframe(disc_df, use_container_width=True, hide_index=True)
+    else:
+        st.success("All Shopify SKUs in this range are mapped to tracked products. 🎉")
+
+    st.markdown("---")
+    st.markdown("**Re-derive sales from raw data**")
+    st.caption(
+        "Run this after a developer adds new SKU mappings to `core/config.py`. "
+        "It re-processes the raw Shopify data and backfills `weekly_sales` for the newly mapped products."
+    )
+    if st.button("🔄 Re-derive Weekly Sales", type="primary", key="rederive_sales"):
+        with st.spinner("Re-deriving weekly sales from raw data..."):
+            mapped, unmapped_count = derive_weekly_sales_from_raw()
+        st.success(
+            f"Done! Mapped **{mapped}** SKUs into `weekly_sales`. "
+            f"{unmapped_count} SKUs still unmapped (see list above)."
+        )
+        log_sync("rederive", "success", mapped)
+        st.rerun()
 
 # ─── ERP Upload ───────────────────────────────────────────────────────────
 with tab_erp:

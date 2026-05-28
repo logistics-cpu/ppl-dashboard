@@ -216,6 +216,17 @@ def init_db():
                 UNIQUE(style, color, size, week_start)
             );
 
+            CREATE TABLE IF NOT EXISTS raw_weekly_sales (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                shopify_sku TEXT NOT NULL,
+                week_start DATE NOT NULL,
+                week_end DATE NOT NULL,
+                units_sold INTEGER NOT NULL DEFAULT 0,
+                source TEXT NOT NULL DEFAULT 'shopify',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(shopify_sku, week_start, source)
+            );
+
             CREATE TABLE IF NOT EXISTS inventory_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 style TEXT NOT NULL,
@@ -354,6 +365,108 @@ def upsert_weekly_sales(style, color, size, week_start, week_end, units_sold, so
         invalidate_cache()
 
 
+# --- Raw Weekly Sales (all SKUs, including unmapped) ---
+
+def upsert_raw_weekly_sales(shopify_sku, week_start, week_end, units_sold, source="shopify"):
+    """Insert or update a raw SKU-level weekly sales row."""
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO raw_weekly_sales (shopify_sku, week_start, week_end, units_sold, source)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(shopify_sku, week_start, source)
+            DO UPDATE SET units_sold=excluded.units_sold, week_end=excluded.week_end
+        """, (shopify_sku, week_start, week_end, units_sold, source))
+        invalidate_cache()
+
+
+def get_unmapped_raw_skus(start_date=None, end_date=None, limit=50):
+    """
+    Return unmapped SKUs from raw_weekly_sales sorted by total units desc.
+    A SKU is "unmapped" if parse_shopify_sku returns None.
+
+    Returns list of dicts: {shopify_sku, total_units, weeks_seen, last_week}
+    """
+    from core.sku_mapper import parse_shopify_sku
+
+    with get_db() as conn:
+        query = """
+            SELECT shopify_sku, SUM(units_sold) AS total_units,
+                   COUNT(DISTINCT week_start) AS weeks_seen,
+                   MAX(week_start) AS last_week
+            FROM raw_weekly_sales
+            WHERE 1=1
+        """
+        params = []
+        if start_date:
+            query += " AND week_start >= ?"
+            params.append(start_date)
+        if end_date:
+            query += " AND week_start <= ?"
+            params.append(end_date)
+        query += " GROUP BY shopify_sku ORDER BY total_units DESC"
+        rows = conn.execute(query, params).fetchall()
+
+    # Filter to only unmapped SKUs
+    unmapped = []
+    for r in rows:
+        sku = r["shopify_sku"]
+        if parse_shopify_sku(sku) is None:
+            unmapped.append({
+                "shopify_sku": sku,
+                "total_units": r["total_units"],
+                "weeks_seen": r["weeks_seen"],
+                "last_week": r["last_week"],
+            })
+        if len(unmapped) >= limit:
+            break
+    return unmapped
+
+
+def derive_weekly_sales_from_raw(start_date=None, end_date=None):
+    """
+    Re-derive weekly_sales from raw_weekly_sales using current SKU mappings.
+
+    For each raw row, attempts to parse the SKU. If mappable, upserts to weekly_sales.
+    Aggregates across multiple SKUs that map to the same (style, color, size).
+
+    Returns: (mapped_count, unmapped_count) — counts of distinct SKUs.
+    """
+    from core.sku_mapper import parse_shopify_sku
+    from collections import defaultdict
+
+    with get_db() as conn:
+        query = "SELECT shopify_sku, week_start, week_end, units_sold, source FROM raw_weekly_sales WHERE 1=1"
+        params = []
+        if start_date:
+            query += " AND week_start >= ?"
+            params.append(start_date)
+        if end_date:
+            query += " AND week_start <= ?"
+            params.append(end_date)
+        rows = conn.execute(query, params).fetchall()
+
+    # Aggregate by (style, color, size, week_start, week_end)
+    agg = defaultdict(int)
+    mapped_skus = set()
+    unmapped_skus = set()
+    for r in rows:
+        sku = r["shopify_sku"]
+        parsed = parse_shopify_sku(sku)
+        if parsed is None:
+            unmapped_skus.add(sku)
+            continue
+        mapped_skus.add(sku)
+        style, color, size = parsed
+        key = (style, color, size, r["week_start"], r["week_end"])
+        agg[key] += r["units_sold"]
+
+    # Upsert aggregated values
+    for (style, color, size, ws, we), units in agg.items():
+        upsert_weekly_sales(style, color, size, ws, we, max(0, units), source="shopify")
+
+    return (len(mapped_skus), len(unmapped_skus))
+
+
 def get_weekly_sales(style=None, color=None, size=None, start_date=None, end_date=None):
     """Fetch weekly sales records, optionally filtered."""
     cache_key = ("weekly_sales", style, color, size, start_date, end_date)
@@ -480,10 +593,12 @@ def log_sync(sync_type, status, records_synced=0, error_message=None):
 
 
 def clear_all_sales():
-    """Delete ALL weekly sales data."""
+    """Delete ALL weekly sales data (both derived and raw)."""
     with get_db() as conn:
         conn.execute("DELETE FROM weekly_sales")
+        conn.execute("DELETE FROM raw_weekly_sales")
         conn.commit()
+    invalidate_cache()
 
 
 def clear_all_inventory():
@@ -494,9 +609,10 @@ def clear_all_inventory():
 
 
 def clear_all_data():
-    """Delete ALL data: sales, inventory, arrivals, transfers, sync logs."""
+    """Delete ALL data: sales, raw sales, inventory, arrivals, transfers, sync logs."""
     with get_db() as conn:
         conn.execute("DELETE FROM weekly_sales")
+        conn.execute("DELETE FROM raw_weekly_sales")
         conn.execute("DELETE FROM inventory_snapshots")
         conn.execute("DELETE FROM production_arrivals")
         conn.execute("DELETE FROM warehouse_transfers")
