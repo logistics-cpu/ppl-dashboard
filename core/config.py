@@ -28,7 +28,7 @@ SHOPIFY_API_VERSION = _get_config("SHOPIFY_API_VERSION", "2025-10")
 # ---------------------------------------------------------------------------
 PRODUCT_GROUPS = {
     "PPL": ["Long", "7/8", "Short"],
-    "Nursing Pillow": ["Nursing Pillow"],
+    "Nursing Pillow": ["Nursing Pillow", "Combo", "BMP"],
     "Hydration": ["Hydration"],
 }
 
@@ -37,6 +37,8 @@ STYLE_CONFIG = {
     "7/8":            {"colors": ["Black", "Olive Green", "Burgundy", "Navy"], "sizes": ["XS", "S", "M", "L", "XL", "2XL", "3XL"]},
     "Short":          {"colors": ["Black", "Olive Green", "Burgundy", "Navy"], "sizes": ["XS", "S", "M", "L", "XL", "2XL", "3XL"]},
     "Nursing Pillow": {"colors": ["\u2014"], "sizes": ["Large", "Set"]},
+    "Combo":          {"colors": ["\u2014"], "sizes": ["Cream", "Turquoise", "Peach", "Ice Grey"]},
+    "BMP":            {"colors": ["\u2014"], "sizes": ["Cream", "Turquoise", "Peach", "Ice Grey"]},
     "Hydration":      {"colors": ["\u2014"], "sizes": ["Passionfruit Orange", "Lemonade", "Lemon Lime", "Variety Pack 15", "Variety Pack 30"]},
 }
 
@@ -119,6 +121,16 @@ SHOPIFY_COLOR_MAP = {
 NP_SKU_MAP = {
     "J11268-breastfeeding-pillow-Large": ("Nursing Pillow", "\u2014", "Large"),
     "J11268-breastfeeding-pillow-Set":   ("Nursing Pillow", "\u2014", "Set"),
+    # Combo accessories
+    "J11268-combo-cream":     ("Combo", "\u2014", "Cream"),
+    "J11268-combo-turquoise": ("Combo", "\u2014", "Turquoise"),
+    "J11268-combo-peach":     ("Combo", "\u2014", "Peach"),
+    "J11268-icecombo-grey":   ("Combo", "\u2014", "Ice Grey"),
+    # BMP accessories
+    "J11268-bmp-cream":     ("BMP", "\u2014", "Cream"),
+    "J11268-bmp-turquoise": ("BMP", "\u2014", "Turquoise"),
+    "J11268-bmp-peach":     ("BMP", "\u2014", "Peach"),
+    "J11268-icebmp-grey":   ("BMP", "\u2014", "Ice Grey"),
 }
 
 # Hydration SKU mapping (exact-match)
