@@ -121,7 +121,7 @@ def render_style_charts(style, df):
 
         # Color map for accessory variants (Combo / BMP) to match actual product colors
         _variant_color_map = {
-            "Cream":     "#F5E6CA",  # soft cream
+            "Cream":     "#D4B896",  # warm tan, readable on white
             "Turquoise": "#40E0D0",
             "Peach":     "#FFB997",
             "Ice Grey":  "#B0C4DE",  # light steel blue / cool grey
