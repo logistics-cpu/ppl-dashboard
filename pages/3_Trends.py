@@ -111,7 +111,12 @@ def render_style_charts(style, df):
         # For products without colors (e.g., Hydration, Nursing Pillow), don't show "—"
         is_no_color = color == "—"
         # Per-style labels for what "size" actually means
-        size_label_map = {"Hydration": ("Flavor", "All Flavors"), "Nursing Pillow": ("Variant", "All Variants")}
+        size_label_map = {
+            "Hydration": ("Flavor", "All Flavors"),
+            "Nursing Pillow": ("Variant", "All Variants"),
+            "Combo": ("Color", "All Colors"),
+            "BMP": ("Color", "All Colors"),
+        }
         size_axis_label, all_suffix = size_label_map.get(style, ("Size", "All Sizes"))
         section_label = style if is_no_color else f"{style} ( {color})"
         title_suffix = f"{style} ({all_suffix})" if is_no_color else f"{style} {color}"
