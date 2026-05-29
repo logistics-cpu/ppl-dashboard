@@ -118,6 +118,15 @@ def render_style_charts(style, df):
             "BMP": ("Color", "All Colors"),
         }
         size_axis_label, all_suffix = size_label_map.get(style, ("Size", "All Sizes"))
+
+        # Color map for accessory variants (Combo / BMP) to match actual product colors
+        _variant_color_map = {
+            "Cream":     "#F5E6CA",  # soft cream
+            "Turquoise": "#40E0D0",
+            "Peach":     "#FFB997",
+            "Ice Grey":  "#B0C4DE",  # light steel blue / cool grey
+        }
+        use_variant_colors = style in ("Combo", "BMP")
         section_label = style if is_no_color else f"{style} ( {color})"
         title_suffix = f"{style} ({all_suffix})" if is_no_color else f"{style} {color}"
         st.markdown(f"#### {color_emoji} {section_label}".strip())
@@ -130,14 +139,18 @@ def render_style_charts(style, df):
             units=("units_sold", "sum")
         ).reset_index().sort_values("week_start")
 
-        fig = px.line(
-            by_size, x="week_label", y="units", color="size",
+        _line_kwargs = dict(
+            data_frame=by_size, x="week_label", y="units", color="size",
             title=f"Units Sold by {size_axis_label} — {title_suffix}",
             labels={"week_label": "Week", "units": "Units Sold", "size": size_axis_label},
             category_orders={"size": style_sizes},
-            color_discrete_sequence=CHART_COLORS,
             markers=True,
         )
+        if use_variant_colors:
+            _line_kwargs["color_discrete_map"] = _variant_color_map
+        else:
+            _line_kwargs["color_discrete_sequence"] = CHART_COLORS
+        fig = px.line(**_line_kwargs)
         fig.update_layout(**PLOTLY_LAYOUT, hovermode="x unified")
         fig.update_traces(line=dict(width=2.5))
         st.plotly_chart(fig, use_container_width=True, key=f"line_{uid}")
