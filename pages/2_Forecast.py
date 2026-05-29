@@ -362,14 +362,40 @@ def recalculate_forecast(df, current_stocks):
 
 
 # ---------------------------------------------------------------------------
-# Style tabs
+# Style tabs (PPL styles flat + grouped non-PPL styles like Pillow → sub-tabs)
 # ---------------------------------------------------------------------------
-style_tabs = st.tabs(ALL_STYLES)
+from core.config import get_other_groups
+PPL_STYLES = [s for s in ALL_STYLES if s in ("Long", "7/8", "Short")]
+OTHER_GROUPS = get_other_groups()
+tab_labels = PPL_STYLES + [g[0] for g in OTHER_GROUPS]
+top_tabs = st.tabs(tab_labels)
+
+# Nested sub-tabs for groups containing multiple styles
+_group_subtabs = {}
+for gi, (gname, gstyles) in enumerate(OTHER_GROUPS):
+    parent_idx = len(PPL_STYLES) + gi
+    with top_tabs[parent_idx]:
+        if len(gstyles) > 1:
+            _group_subtabs[gname] = st.tabs(gstyles)
+        else:
+            _group_subtabs[gname] = [st.container()]
+
+
+def _get_forecast_container(style):
+    if style in PPL_STYLES:
+        return top_tabs[PPL_STYLES.index(style)]
+    for gname, gstyles in OTHER_GROUPS:
+        if style in gstyles:
+            return _group_subtabs[gname][gstyles.index(style)]
+    return None
+
+
+_style_order = PPL_STYLES + [s for _, ss in OTHER_GROUPS for s in ss]
 
 _COLOR_EMOJI = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "Navy": "🔵", "—": ""}
 
-for style_idx, style in enumerate(ALL_STYLES):
-    with style_tabs[style_idx]:
+for style in _style_order:
+    with _get_forecast_container(style):
         colors_to_show = get_colors(style)
 
         # Nested color tabs so you always see which color is active

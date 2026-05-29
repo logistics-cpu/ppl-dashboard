@@ -345,25 +345,53 @@ def render_sales_table(style, color, color_sales, heading):
 
 
 # ---------------------------------------------------------------------------
-# Tabs: Long | 7/8 | Short | ⚫ Black | 🫒 Olive Green | 🍷 Burgundy | Nursing Pillow
+# Tabs: Long | 7/8 | Short | ⚫ Black | 🫒 Olive Green | 🍷 Burgundy | 🔵 Navy | Pillow | Hydration
 # ---------------------------------------------------------------------------
+from core.config import get_other_groups
 st.markdown("")
 color_emoji_map = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "Navy": "🔵"}
 PPL_STYLES = [s for s in ALL_STYLES if s in ("Long", "7/8", "Short")]
-OTHER_STYLES = [s for s in ALL_STYLES if s not in PPL_STYLES]
-tab_labels = PPL_STYLES + [f"{color_emoji_map.get(c, '')} {c}" for c in COLORS] + OTHER_STYLES
+OTHER_GROUPS = get_other_groups()  # [(group_name, [styles])]
+tab_labels = (
+    PPL_STYLES
+    + [f"{color_emoji_map.get(c, '')} {c}" for c in COLORS]
+    + [g[0] for g in OTHER_GROUPS]
+)
 all_tabs = st.tabs(tab_labels)
 
-# Tab index layout: [PPL styles] [colors] [other styles]
-_style_tab_order = PPL_STYLES + OTHER_STYLES
+# Build a flat style → (parent_tab, sub_tab_idx) lookup for rendering.
+# PPL styles get their own top-level tab (no sub-tab).
+# Other styles share a parent group tab containing sub-tabs.
+_style_tab_order = PPL_STYLES + [s for _, styles in OTHER_GROUPS for s in styles]
 
-# --- Style tabs: grouped by color (PPL styles at front, others at back) ---
-for style in _style_tab_order:
+# Pre-render the parent group tab containers so we can nest sub-tabs inside.
+_group_subtabs = {}  # group_name -> list of streamlit tab containers
+for gi, (group_name, group_styles) in enumerate(OTHER_GROUPS):
+    parent_idx = len(PPL_STYLES) + len(COLORS) + gi
+    with all_tabs[parent_idx]:
+        if len(group_styles) > 1:
+            _group_subtabs[group_name] = st.tabs(group_styles)
+        else:
+            # Single-style group: use the parent tab directly as the only container
+            _group_subtabs[group_name] = [st.container()]
+
+
+def _get_style_container(style):
+    """Return the streamlit container where a given style's content should render."""
     if style in PPL_STYLES:
-        tab_idx = PPL_STYLES.index(style)
-    else:
-        tab_idx = len(PPL_STYLES) + len(COLORS) + OTHER_STYLES.index(style)
-    with all_tabs[tab_idx]:
+        return all_tabs[PPL_STYLES.index(style)]
+    # Find which group this style belongs to
+    for group_name, group_styles in OTHER_GROUPS:
+        if style in group_styles:
+            sub_idx = group_styles.index(style)
+            return _group_subtabs[group_name][sub_idx]
+    return None  # shouldn't happen
+
+
+# --- Style tabs: grouped by color (PPL styles at front, others nested by group) ---
+for style in _style_tab_order:
+    _container = _get_style_container(style)
+    with _container:
         style_colors = get_colors(style)
         style_sales = [r for r in all_sales if r["style"] == style]
 

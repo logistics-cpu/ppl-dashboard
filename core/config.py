@@ -28,9 +28,21 @@ SHOPIFY_API_VERSION = _get_config("SHOPIFY_API_VERSION", "2025-10")
 # ---------------------------------------------------------------------------
 PRODUCT_GROUPS = {
     "PPL": ["Long", "7/8", "Short"],
-    "Nursing Pillow": ["Nursing Pillow", "Combo", "BMP"],
+    "Pillow": ["Nursing Pillow", "Combo", "BMP"],
     "Hydration": ["Hydration"],
 }
+
+
+def get_other_groups():
+    """
+    Return list of (group_name, [styles]) for non-PPL product groups.
+    Used to render grouped sub-tabs on dashboard pages.
+    """
+    return [
+        (group, styles)
+        for group, styles in PRODUCT_GROUPS.items()
+        if group != "PPL"
+    ]
 
 STYLE_CONFIG = {
     "Long":           {"colors": ["Black", "Olive Green", "Burgundy", "Navy"], "sizes": ["XS", "S", "M", "L", "XL", "2XL", "3XL"]},

@@ -335,32 +335,28 @@ if not df_hydration.empty:
 # ---------------------------------------------------------------------------
 # Tabs: Long | 7/8 | Short | ⚫ Black | 🫒 Olive Green | 🍷 Burgundy | Nursing Pillow
 # ---------------------------------------------------------------------------
+from core.config import get_other_groups
 st.markdown("")
 color_emoji_map = {"Black": "⚫", "Olive Green": "🫒", "Burgundy": "🍷", "Navy": "🔵", "—": ""}
 PPL_STYLES = [s for s in ALL_STYLES if s in ("Long", "7/8", "Short")]
-OTHER_STYLES = [s for s in ALL_STYLES if s not in PPL_STYLES]
+OTHER_GROUPS = get_other_groups()  # [(group_name, [styles])]
 all_colors_seen = []
 for _s in PPL_STYLES:
     for _c in get_colors(_s):
         if _c not in all_colors_seen and _c != "—":
             all_colors_seen.append(_c)
-tab_labels = PPL_STYLES + [f"{color_emoji_map.get(c, '')} {c}" for c in all_colors_seen] + OTHER_STYLES
+tab_labels = (
+    PPL_STYLES
+    + [f"{color_emoji_map.get(c, '')} {c}" for c in all_colors_seen]
+    + [g[0] for g in OTHER_GROUPS]
+)
 all_tabs = st.tabs(tab_labels)
 
 df_filtered = filter_by_period(df_all)
 
-# --- Style tabs: PPL at front, others (e.g. Nursing Pillow) at end ---
+# --- PPL Style tabs ---
 for style_idx, style in enumerate(PPL_STYLES):
     with all_tabs[style_idx]:
-        sdf = df_filtered[df_filtered["style"] == style]
-        if sdf.empty:
-            st.info(f"No sales data for {style}.")
-        else:
-            render_style_charts(style, sdf)
-
-for other_idx, style in enumerate(OTHER_STYLES):
-    tab_idx = len(PPL_STYLES) + len(all_colors_seen) + other_idx
-    with all_tabs[tab_idx]:
         sdf = df_filtered[df_filtered["style"] == style]
         if sdf.empty:
             st.info(f"No sales data for {style}.")
@@ -375,3 +371,19 @@ for color_idx, color in enumerate(all_colors_seen):
             st.info(f"No sales data for {color}.")
         else:
             render_color_charts(color, cdf)
+
+# --- Other product group tabs (e.g. Pillow → Nursing Pillow/Combo/BMP) ---
+for gi, (gname, gstyles) in enumerate(OTHER_GROUPS):
+    parent_idx = len(PPL_STYLES) + len(all_colors_seen) + gi
+    with all_tabs[parent_idx]:
+        if len(gstyles) > 1:
+            sub_tabs = st.tabs(gstyles)
+        else:
+            sub_tabs = [st.container()]
+        for si, style in enumerate(gstyles):
+            with sub_tabs[si]:
+                sdf = df_filtered[df_filtered["style"] == style]
+                if sdf.empty:
+                    st.info(f"No sales data for {style}.")
+                else:
+                    render_style_charts(style, sdf)
