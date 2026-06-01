@@ -69,25 +69,26 @@ with fc2:
 wh_filter = None if sel_warehouse == "All warehouses" else sel_warehouse
 ctry_filter = None if sel_country == "All countries" else sel_country
 
-# Fetch filtered rows
-rows = get_dropship_orders(
+# Fetch ALL rows matching filters for KPI / summary calculation (no row limit).
+# A separate, limited query is used only for the detail table below.
+all_filtered = get_dropship_orders(
     start_date=f_start.isoformat(),
     end_date=f_end.isoformat(),
     warehouse=wh_filter,
     country=ctry_filter,
-    limit=f_limit,
+    limit=100000,
 )
 
 # ---------------------------------------------------------------------------
-# KPIs
+# KPIs (always based on the FULL date range + filters, not the display limit)
 # ---------------------------------------------------------------------------
-unique_orders = len({r["order_number"] for r in rows if r.get("order_number")})
-total_units = sum((r.get("quantity") or 0) for r in rows)
-unique_countries = len({r.get("country") for r in rows if r.get("country")})
+unique_orders = len({r["order_number"] for r in all_filtered if r.get("order_number")})
+total_units = sum((r.get("quantity") or 0) for r in all_filtered)
+unique_countries = len({r.get("country") for r in all_filtered if r.get("country")})
 
-# Show how many shipped from China
-china_shipped = sum(1 for r in rows if r.get("warehouse") == "China")
-china_pct = (china_shipped / len(rows) * 100) if rows else 0
+# Share of line items shipped from China
+china_shipped = sum(1 for r in all_filtered if r.get("warehouse") == "China")
+china_pct = (china_shipped / len(all_filtered) * 100) if all_filtered else 0
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Orders", f"{unique_orders:,}")
@@ -95,16 +96,21 @@ m2.metric("Units", f"{total_units:,}")
 m3.metric("Destinations", f"{unique_countries}")
 m4.metric("From China", f"{china_pct:.0f}%")
 
+st.caption(
+    f"Stats above cover all rows from {f_start.isoformat()} to {f_end.isoformat()}. "
+    f"Detail table below shows up to {f_limit} most recent rows."
+)
+
 st.markdown("---")
 
 # ---------------------------------------------------------------------------
-# Warehouse + Country summaries
+# Warehouse + Country summaries (use the FULL filtered set, not the limited table)
 # ---------------------------------------------------------------------------
 sc1, sc2 = st.columns(2)
 with sc1:
     st.markdown("### By Warehouse")
     wh_data = {}
-    for r in rows:
+    for r in all_filtered:
         w = r.get("warehouse") or "Unknown"
         if w not in wh_data:
             wh_data[w] = {"orders": set(), "units": 0}
@@ -119,7 +125,7 @@ with sc1:
 with sc2:
     st.markdown("### Top Destinations")
     ctry_data = {}
-    for r in rows:
+    for r in all_filtered:
         c = r.get("country") or "Unknown"
         if c not in ctry_data:
             ctry_data[c] = {"orders": set(), "units": 0}
@@ -134,9 +140,10 @@ with sc2:
 st.markdown("---")
 
 # ---------------------------------------------------------------------------
-# Detail table
+# Detail table (limited to f_limit most recent rows for display performance)
 # ---------------------------------------------------------------------------
 st.markdown("### Order Detail")
+rows = all_filtered[:f_limit]
 detail_rows = []
 for r in rows:
     detail_rows.append({
