@@ -519,10 +519,11 @@ def get_orders_count(start_date=None, end_date=None):
 
 # --- Dropship Orders (uploaded from Excel) ---
 
-# Warehouse Chinese → display name (extends config.WAREHOUSES)
+# Warehouse Chinese → display name (extends config.WAREHOUSES).
+# Both 默认仓库 and 东莞爆品仓 are mapped to "China" so they aggregate together.
 DROPSHIP_WAREHOUSE_MAP = {
     "默认仓库": "China",
-    "东莞爆品仓": "China (Dongguan)",
+    "东莞爆品仓": "China",
     "美国新泽西仓-递四方(新)": "US NJ",
     "美国洛杉矶3仓-递四方(新)": "US LA",
     "加拿大温哥华仓-递四方(新)": "Canada",

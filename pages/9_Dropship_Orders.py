@@ -86,10 +86,7 @@ total_units = sum((r.get("quantity") or 0) for r in rows)
 unique_countries = len({r.get("country") for r in rows if r.get("country")})
 
 # Show how many shipped from China
-china_shipped = sum(
-    1 for r in rows
-    if r.get("warehouse") in ("China", "China (Dongguan)")
-)
+china_shipped = sum(1 for r in rows if r.get("warehouse") == "China")
 china_pct = (china_shipped / len(rows) * 100) if rows else 0
 
 m1, m2, m3, m4 = st.columns(4)
