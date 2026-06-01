@@ -35,13 +35,16 @@ if all_summary["total_orders"] == 0:
     st.stop()
 
 today = date.today()
-default_start = today - timedelta(days=30)
+# Default to the previous complete month (e.g. in June, show May 1 - May 31)
+first_of_this_month = today.replace(day=1)
+default_end = first_of_this_month - timedelta(days=1)        # last day of previous month
+default_start = default_end.replace(day=1)                   # first day of previous month
 
 fcol1, fcol2, fcol3 = st.columns([2, 2, 2])
 with fcol1:
     f_start = st.date_input("From", value=default_start, key="ds_filter_start")
 with fcol2:
-    f_end = st.date_input("To", value=today, key="ds_filter_end")
+    f_end = st.date_input("To", value=default_end, key="ds_filter_end")
 with fcol3:
     f_limit = st.selectbox(
         "Show", options=[100, 250, 500, 1000, 2000], index=2, key="ds_limit",
