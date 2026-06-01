@@ -576,18 +576,50 @@ DROPSHIP_COUNTRY_MAP = {
 }
 
 
+_DROPSHIP_COLS = [
+    "order_number", "paid_at_utc", "paid_at_local", "status",
+    "erp_sku", "shopify_sku", "quantity",
+    "warehouse_raw", "warehouse", "country_raw", "country", "region",
+    "shipping_carrier", "style", "color", "size",
+]
+
+
 def insert_dropship_row(row):
     """Insert a single dropship line item row. row is a dict matching the table columns."""
-    cols = [
-        "order_number", "paid_at_utc", "paid_at_local", "status",
-        "erp_sku", "shopify_sku", "quantity",
-        "warehouse_raw", "warehouse", "country_raw", "country", "region",
-        "shipping_carrier", "style", "color", "size",
-    ]
-    placeholders = ",".join("?" * len(cols))
-    sql = f"INSERT INTO dropship_orders ({','.join(cols)}) VALUES ({placeholders})"
+    placeholders = ",".join("?" * len(_DROPSHIP_COLS))
+    sql = f"INSERT INTO dropship_orders ({','.join(_DROPSHIP_COLS)}) VALUES ({placeholders})"
     with get_db() as conn:
-        conn.execute(sql, tuple(row.get(c) for c in cols))
+        conn.execute(sql, tuple(row.get(c) for c in _DROPSHIP_COLS))
+
+
+def insert_dropship_rows_bulk(rows, batch_size=200):
+    """
+    Bulk-insert many dropship rows using multi-VALUES INSERTs.
+    Drastically reduces HTTP roundtrips to Turso (1 call per batch instead of per row).
+
+    Args:
+        rows: list of dicts matching _DROPSHIP_COLS
+        batch_size: number of rows per INSERT statement
+    """
+    if not rows:
+        return 0
+
+    one_row_placeholders = "(" + ",".join("?" * len(_DROPSHIP_COLS)) + ")"
+    col_list = ",".join(_DROPSHIP_COLS)
+    inserted = 0
+
+    with get_db() as conn:
+        for i in range(0, len(rows), batch_size):
+            chunk = rows[i:i + batch_size]
+            multi_values = ",".join([one_row_placeholders] * len(chunk))
+            sql = f"INSERT INTO dropship_orders ({col_list}) VALUES {multi_values}"
+            flat_params = []
+            for row in chunk:
+                for c in _DROPSHIP_COLS:
+                    flat_params.append(row.get(c))
+            conn.execute(sql, flat_params)
+            inserted += len(chunk)
+    return inserted
 
 
 def delete_dropship_in_range(start_date, end_date):

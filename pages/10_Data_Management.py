@@ -611,7 +611,7 @@ with tab_dropship:
     """, unsafe_allow_html=True)
 
     from core.database import (
-        insert_dropship_row, delete_dropship_in_range,
+        insert_dropship_rows_bulk, delete_dropship_in_range,
         DROPSHIP_WAREHOUSE_MAP, DROPSHIP_COUNTRY_MAP,
         clear_all_dropship_orders,
     )
@@ -728,12 +728,11 @@ with tab_dropship:
             )
 
             if st.button("Import Dropship Data", type="primary", key="import_dropship"):
-                with st.spinner("Importing..."):
+                with st.spinner(f"Importing {len(parsed_rows)} rows in bulk batches..."):
                     delete_dropship_in_range(min_date, max_date)
-                    for row in parsed_rows:
-                        insert_dropship_row(row)
-                log_sync("dropship_upload", "success", len(parsed_rows))
-                st.success(f"Imported **{len(parsed_rows)}** dropship rows.")
+                    n = insert_dropship_rows_bulk(parsed_rows, batch_size=200)
+                log_sync("dropship_upload", "success", n)
+                st.success(f"Imported **{n}** dropship rows.")
                 st.rerun()
 
         except Exception as e:
