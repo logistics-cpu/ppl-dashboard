@@ -52,7 +52,6 @@ query OrdersDetail($query: String!, $cursor: String) {
                 currentTotalTaxSet { presentmentMoney { amount } }
                 totalShippingPriceSet { presentmentMoney { amount } }
                 sourceName
-                customer { id }
                 shippingAddress {
                     country
                     countryCodeV2

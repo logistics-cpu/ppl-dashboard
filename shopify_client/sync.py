@@ -254,7 +254,7 @@ def sync_orders(start_date, end_date):
                 "total_tax": _money(order, "currentTotalTaxSet", "presentmentMoney", "amount"),
                 "total_shipping": _money(order, "totalShippingPriceSet", "presentmentMoney", "amount"),
                 "currency": (order.get("currentTotalPriceSet") or {}).get("presentmentMoney", {}).get("currencyCode"),
-                "customer_id_hash": _hash_customer_id(order.get("customer")),
+                "customer_id_hash": _hash_customer_id(order.get("customer")),  # None — customer field requires read_customers scope
                 "ship_country": ship.get("country"),
                 "ship_country_code": ship.get("countryCodeV2"),
                 "ship_state": ship.get("province"),
