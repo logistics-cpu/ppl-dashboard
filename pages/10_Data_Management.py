@@ -654,9 +654,12 @@ with tab_dropship:
                     parsed = parse_erp_sku(erp_sku)
                 style, color, size = parsed if parsed else (None, None, None)
 
-                wh_raw = str(r.get("仓库") or "").strip()
+                # Treat NaN / empty as Unknown, not the literal string "nan"
+                wh_val = r.get("仓库")
+                wh_raw = str(wh_val).strip() if pd.notna(wh_val) else ""
                 wh = DROPSHIP_WAREHOUSE_MAP.get(wh_raw, wh_raw or "Unknown")
-                ctry_raw = str(r.get("国家(中)") or "").strip()
+                ctry_val = r.get("国家(中)")
+                ctry_raw = str(ctry_val).strip() if pd.notna(ctry_val) else ""
                 ctry = DROPSHIP_COUNTRY_MAP.get(ctry_raw, ctry_raw or "Unknown")
 
                 qty_val = r.get("商品数量")
@@ -665,11 +668,20 @@ with tab_dropship:
                 except (ValueError, TypeError):
                     qty = 0
 
+                def _clean(val):
+                    """Strip + treat NaN/empty as None, never the literal string 'nan'."""
+                    if val is None or (isinstance(val, float) and pd.isna(val)):
+                        return None
+                    s = str(val).strip()
+                    if not s or s.lower() == "nan":
+                        return None
+                    return s
+
                 parsed_rows.append({
-                    "order_number": str(r.get("交易编号") or "").strip(),
+                    "order_number": _clean(r.get("交易编号")),
                     "paid_at_utc": str(paid_at_utc) if paid_at_utc else None,
                     "paid_at_local": paid_at_local,
-                    "status": str(r.get("平台订单状态") or "").strip() or None,
+                    "status": _clean(r.get("平台订单状态")),
                     "erp_sku": erp_sku or None,
                     "shopify_sku": sho_sku or None,
                     "quantity": qty,
@@ -677,8 +689,8 @@ with tab_dropship:
                     "warehouse": wh,
                     "country_raw": ctry_raw or None,
                     "country": ctry,
-                    "region": str(r.get("所属地区（省/州）") or "").strip() or None,
-                    "shipping_carrier": str(r.get("物流渠道") or "").strip() or None,
+                    "region": _clean(r.get("所属地区（省/州）")),
+                    "shipping_carrier": _clean(r.get("物流渠道")),
                     "style": style,
                     "color": color,
                     "size": size,

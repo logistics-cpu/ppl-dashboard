@@ -528,6 +528,8 @@ DROPSHIP_WAREHOUSE_MAP = {
     "美国洛杉矶3仓-递四方(新)": "US LA",
     "加拿大温哥华仓-递四方(新)": "Canada",
     "澳洲悉尼仓-递四方(新)": "Australia",
+    "美东仓库-中邮海外仓": "US East (China Post)",
+    "美西仓库-中邮海外仓": "US West (China Post)",
 }
 
 # Common country Chinese → English
@@ -574,6 +576,23 @@ DROPSHIP_COUNTRY_MAP = {
     "泰国": "Thailand",
     "越南": "Vietnam",
     "南非": "South Africa",
+    "以色列": "Israel",
+    "马耳他": "Malta",
+    "卢森堡": "Luxembourg",
+    "斯洛伐克": "Slovakia",
+    "匈牙利": "Hungary",
+    "罗马尼亚": "Romania",
+    "克罗地亚": "Croatia",
+    "保加利亚": "Bulgaria",
+    "塞尔维亚": "Serbia",
+    "乌克兰": "Ukraine",
+    "智利": "Chile",
+    "阿根廷": "Argentina",
+    "哥伦比亚": "Colombia",
+    "秘鲁": "Peru",
+    "埃及": "Egypt",
+    "肯尼亚": "Kenya",
+    "尼日利亚": "Nigeria",
 }
 
 
