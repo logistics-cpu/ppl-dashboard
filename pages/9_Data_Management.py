@@ -13,6 +13,7 @@ from core.database import (
     upsert_weekly_sales, get_last_sync,
     clear_all_sales, clear_all_inventory, clear_all_data,
     get_unmapped_raw_skus, derive_weekly_sales_from_raw,
+    get_orders_count, clear_all_orders,
 )
 from erp.parser import parse_erp_excel
 from core.auth import check_password
@@ -548,8 +549,7 @@ with tab_orders:
     </div>
     """, unsafe_allow_html=True)
 
-    from core.database import get_orders_count, get_last_sync as _gls_orders, clear_all_orders
-    last_order_sync = _gls_orders("shopify_orders")
+    last_order_sync = get_last_sync("shopify_orders")
     if last_order_sync:
         st.success(
             f"Last order sync: {last_order_sync['completed_at']} — "
