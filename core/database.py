@@ -272,6 +272,32 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(shopify_order_id);
             CREATE INDEX IF NOT EXISTS idx_order_items_sku ON order_items(shopify_sku);
 
+            CREATE TABLE IF NOT EXISTS dropship_orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_number TEXT NOT NULL,
+                paid_at_utc TIMESTAMP,
+                paid_at_local DATE,
+                status TEXT,
+                erp_sku TEXT,
+                shopify_sku TEXT,
+                quantity INTEGER NOT NULL DEFAULT 0,
+                warehouse_raw TEXT,
+                warehouse TEXT,
+                country_raw TEXT,
+                country TEXT,
+                region TEXT,
+                shipping_carrier TEXT,
+                style TEXT,
+                color TEXT,
+                size TEXT,
+                uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_dropship_paid_date ON dropship_orders(paid_at_local);
+            CREATE INDEX IF NOT EXISTS idx_dropship_warehouse ON dropship_orders(warehouse);
+            CREATE INDEX IF NOT EXISTS idx_dropship_country ON dropship_orders(country);
+            CREATE INDEX IF NOT EXISTS idx_dropship_order_num ON dropship_orders(order_number);
+
             CREATE TABLE IF NOT EXISTS inventory_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 style TEXT NOT NULL,
@@ -489,6 +515,153 @@ def get_orders_count(start_date=None, end_date=None):
     with get_db() as conn:
         row = conn.execute(query, params).fetchone()
         return row["n"] if row else 0
+
+
+# --- Dropship Orders (uploaded from Excel) ---
+
+# Warehouse Chinese → display name (extends config.WAREHOUSES)
+DROPSHIP_WAREHOUSE_MAP = {
+    "默认仓库": "China",
+    "东莞爆品仓": "China (Dongguan)",
+    "美国新泽西仓-递四方(新)": "US NJ",
+    "美国洛杉矶3仓-递四方(新)": "US LA",
+    "加拿大温哥华仓-递四方(新)": "Canada",
+    "澳洲悉尼仓-递四方(新)": "Australia",
+}
+
+# Common country Chinese → English
+DROPSHIP_COUNTRY_MAP = {
+    "美国": "United States",
+    "英国": "United Kingdom",
+    "加拿大": "Canada",
+    "澳大利亚": "Australia",
+    "荷兰": "Netherlands",
+    "爱尔兰": "Ireland",
+    "中国香港": "Hong Kong",
+    "沙特阿拉伯": "Saudi Arabia",
+    "德国": "Germany",
+    "葡萄牙": "Portugal",
+    "中国台湾": "Taiwan",
+    "阿尔巴尼亚": "Albania",
+    "新加坡": "Singapore",
+    "菲律宾": "Philippines",
+    "比利时": "Belgium",
+    "法国": "France",
+    "西班牙": "Spain",
+    "意大利": "Italy",
+    "日本": "Japan",
+    "韩国": "South Korea",
+    "瑞典": "Sweden",
+    "挪威": "Norway",
+    "丹麦": "Denmark",
+    "芬兰": "Finland",
+    "波兰": "Poland",
+    "新西兰": "New Zealand",
+    "墨西哥": "Mexico",
+    "巴西": "Brazil",
+    "阿联酋": "United Arab Emirates",
+    "瑞士": "Switzerland",
+    "奥地利": "Austria",
+    "捷克": "Czechia",
+    "希腊": "Greece",
+    "俄罗斯": "Russia",
+    "土耳其": "Turkey",
+    "印度": "India",
+    "中国": "China",
+    "马来西亚": "Malaysia",
+    "印度尼西亚": "Indonesia",
+    "泰国": "Thailand",
+    "越南": "Vietnam",
+    "南非": "South Africa",
+}
+
+
+def insert_dropship_row(row):
+    """Insert a single dropship line item row. row is a dict matching the table columns."""
+    cols = [
+        "order_number", "paid_at_utc", "paid_at_local", "status",
+        "erp_sku", "shopify_sku", "quantity",
+        "warehouse_raw", "warehouse", "country_raw", "country", "region",
+        "shipping_carrier", "style", "color", "size",
+    ]
+    placeholders = ",".join("?" * len(cols))
+    sql = f"INSERT INTO dropship_orders ({','.join(cols)}) VALUES ({placeholders})"
+    with get_db() as conn:
+        conn.execute(sql, tuple(row.get(c) for c in cols))
+
+
+def delete_dropship_in_range(start_date, end_date):
+    """Delete dropship rows where paid_at_local falls in [start_date, end_date]."""
+    with get_db() as conn:
+        conn.execute(
+            "DELETE FROM dropship_orders WHERE paid_at_local BETWEEN ? AND ?",
+            (start_date, end_date),
+        )
+        conn.commit()
+
+
+def get_dropship_orders(
+    start_date=None, end_date=None, warehouse=None, country=None,
+    limit=2000,
+):
+    query = "SELECT * FROM dropship_orders WHERE 1=1"
+    params = []
+    if start_date:
+        query += " AND paid_at_local >= ?"
+        params.append(start_date)
+    if end_date:
+        query += " AND paid_at_local <= ?"
+        params.append(end_date)
+    if warehouse:
+        query += " AND warehouse = ?"
+        params.append(warehouse)
+    if country:
+        query += " AND country = ?"
+        params.append(country)
+    query += " ORDER BY paid_at_local DESC, order_number DESC LIMIT ?"
+    params.append(limit)
+    with get_db() as conn:
+        return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+
+def get_dropship_summary(start_date=None, end_date=None):
+    """Return aggregated stats for dropship orders in the date range."""
+    base = "FROM dropship_orders WHERE 1=1"
+    params = []
+    if start_date:
+        base += " AND paid_at_local >= ?"
+        params.append(start_date)
+    if end_date:
+        base += " AND paid_at_local <= ?"
+        params.append(end_date)
+    with get_db() as conn:
+        total = conn.execute(
+            f"SELECT COUNT(DISTINCT order_number) AS orders, SUM(quantity) AS units {base}",
+            params,
+        ).fetchone()
+        by_wh = conn.execute(
+            f"SELECT warehouse, COUNT(DISTINCT order_number) AS orders, SUM(quantity) AS units "
+            f"{base} GROUP BY warehouse ORDER BY orders DESC",
+            params,
+        ).fetchall()
+        by_country = conn.execute(
+            f"SELECT country, COUNT(DISTINCT order_number) AS orders, SUM(quantity) AS units "
+            f"{base} GROUP BY country ORDER BY orders DESC LIMIT 20",
+            params,
+        ).fetchall()
+        return {
+            "total_orders": (total["orders"] or 0) if total else 0,
+            "total_units": (total["units"] or 0) if total else 0,
+            "by_warehouse": [dict(r) for r in by_wh],
+            "by_country": [dict(r) for r in by_country],
+        }
+
+
+def clear_all_dropship_orders():
+    """Delete ALL dropship rows."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM dropship_orders")
+        conn.commit()
 
 
 # --- Raw Weekly Sales (all SKUs, including unmapped) ---
@@ -750,6 +923,7 @@ def clear_all_data():
         conn.execute("DELETE FROM raw_weekly_sales")
         conn.execute("DELETE FROM order_items")
         conn.execute("DELETE FROM orders")
+        conn.execute("DELETE FROM dropship_orders")
         conn.execute("DELETE FROM inventory_snapshots")
         conn.execute("DELETE FROM production_arrivals")
         conn.execute("DELETE FROM warehouse_transfers")

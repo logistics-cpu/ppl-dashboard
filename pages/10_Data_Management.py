@@ -172,9 +172,13 @@ st.markdown("""
 # ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
-tab_shopify, tab_orders, tab_discovery, tab_erp, tab_arrivals, tab_transfers, tab_settings, tab_danger = st.tabs([
+(
+    tab_shopify, tab_orders, tab_dropship, tab_discovery, tab_erp,
+    tab_arrivals, tab_transfers, tab_settings, tab_danger,
+) = st.tabs([
     "Shopify Sync",
     "Order Sync",
+    "Dropship Upload",
     "SKU Discovery",
     "ERP Upload",
     "Production Arrivals",
@@ -586,6 +590,161 @@ with tab_orders:
         if st.button("Clear orders", key="clear_orders_btn"):
             clear_all_orders()
             st.success("All order data cleared.")
+            st.rerun()
+
+
+# ─── Dropship Upload ──────────────────────────────────────────────────────
+with tab_dropship:
+    st.markdown("""
+    <div class="dm-section">
+        <div class="dm-section-title">Dropship Orders Upload</div>
+        <div class="dm-section-desc">
+            Upload the Chinese ERP export Excel for dropship orders (orders shipped
+            from China). Expected columns:<br>
+            <code>交易编号</code>, <code>平台订单状态</code>, <code>付款时间</code>,
+            <code>SKU</code>, <code>平台SKU</code>, <code>商品数量</code>,
+            <code>仓库</code>, <code>国家(中)</code>, <code>物流渠道</code>,
+            <code>所属地区（省/州）</code>.<br><br>
+            On upload, existing rows in the file's date range are replaced.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    from core.database import (
+        insert_dropship_row, delete_dropship_in_range,
+        DROPSHIP_WAREHOUSE_MAP, DROPSHIP_COUNTRY_MAP,
+        clear_all_dropship_orders,
+    )
+    from core.sku_mapper import parse_shopify_sku, parse_erp_sku
+
+    ds_file = st.file_uploader(
+        "Upload Dropship Excel",
+        type=["xlsx", "xls"],
+        key="dropship_upload",
+        help="ERP export containing 交易编号, 付款时间, 仓库, etc.",
+    )
+
+    if ds_file:
+        try:
+            ds_df = pd.read_excel(ds_file)
+
+            required = ["交易编号", "付款时间", "SKU", "平台SKU", "商品数量", "仓库", "国家(中)"]
+            missing = [c for c in required if c not in ds_df.columns]
+            if missing:
+                st.error(f"Missing required columns: {', '.join(missing)}")
+                st.stop()
+
+            # Parse rows into the storage format
+            parsed_rows = []
+            for _, r in ds_df.iterrows():
+                paid_at_utc = r.get("付款时间")
+                if pd.isna(paid_at_utc):
+                    paid_at_utc = None
+                    paid_at_local = None
+                else:
+                    paid_at_utc = pd.to_datetime(paid_at_utc)
+                    paid_at_local = paid_at_utc.date().isoformat()
+
+                erp_sku = str(r.get("SKU") or "").strip()
+                sho_sku = str(r.get("平台SKU") or "").strip()
+
+                # Try mapping (Shopify first, then ERP)
+                parsed = parse_shopify_sku(sho_sku) if sho_sku else None
+                if parsed is None and erp_sku:
+                    parsed = parse_erp_sku(erp_sku)
+                style, color, size = parsed if parsed else (None, None, None)
+
+                wh_raw = str(r.get("仓库") or "").strip()
+                wh = DROPSHIP_WAREHOUSE_MAP.get(wh_raw, wh_raw or "Unknown")
+                ctry_raw = str(r.get("国家(中)") or "").strip()
+                ctry = DROPSHIP_COUNTRY_MAP.get(ctry_raw, ctry_raw or "Unknown")
+
+                qty_val = r.get("商品数量")
+                try:
+                    qty = int(qty_val) if pd.notna(qty_val) else 0
+                except (ValueError, TypeError):
+                    qty = 0
+
+                parsed_rows.append({
+                    "order_number": str(r.get("交易编号") or "").strip(),
+                    "paid_at_utc": str(paid_at_utc) if paid_at_utc else None,
+                    "paid_at_local": paid_at_local,
+                    "status": str(r.get("平台订单状态") or "").strip() or None,
+                    "erp_sku": erp_sku or None,
+                    "shopify_sku": sho_sku or None,
+                    "quantity": qty,
+                    "warehouse_raw": wh_raw or None,
+                    "warehouse": wh,
+                    "country_raw": ctry_raw or None,
+                    "country": ctry,
+                    "region": str(r.get("所属地区（省/州）") or "").strip() or None,
+                    "shipping_carrier": str(r.get("物流渠道") or "").strip() or None,
+                    "style": style,
+                    "color": color,
+                    "size": size,
+                })
+
+            valid_dates = [r["paid_at_local"] for r in parsed_rows if r["paid_at_local"]]
+            if not valid_dates:
+                st.error("No valid 付款时间 dates found in the file.")
+                st.stop()
+
+            min_date = min(valid_dates)
+            max_date = max(valid_dates)
+            unique_orders = len({r["order_number"] for r in parsed_rows if r["order_number"]})
+            total_units = sum(r["quantity"] for r in parsed_rows)
+            mapped_rows = sum(1 for r in parsed_rows if r["style"])
+
+            st.success(
+                f"Parsed **{len(parsed_rows)}** line items "
+                f"({unique_orders} orders, {total_units} units) "
+                f"from {min_date} to {max_date}"
+            )
+            st.caption(
+                f"{mapped_rows} rows mapped to tracked products · "
+                f"{len(parsed_rows) - mapped_rows} unmapped"
+            )
+
+            # Preview
+            preview_df = pd.DataFrame([
+                {
+                    "Order #": r["order_number"],
+                    "Paid": r["paid_at_local"],
+                    "Warehouse": r["warehouse"],
+                    "Country": r["country"],
+                    "Region": r["region"] or "",
+                    "Qty": r["quantity"],
+                    "Shopify SKU": r["shopify_sku"] or "",
+                    "Mapped": f"{r['style']} / {r['color']} / {r['size']}" if r["style"] else "—",
+                }
+                for r in parsed_rows[:50]
+            ])
+            with st.expander("Preview first 50 rows"):
+                st.dataframe(preview_df, use_container_width=True, hide_index=True)
+
+            st.warning(
+                f"Importing will **delete** any existing dropship rows where "
+                f"paid_at is between **{min_date}** and **{max_date}**, then insert these {len(parsed_rows)} rows."
+            )
+
+            if st.button("Import Dropship Data", type="primary", key="import_dropship"):
+                with st.spinner("Importing..."):
+                    delete_dropship_in_range(min_date, max_date)
+                    for row in parsed_rows:
+                        insert_dropship_row(row)
+                log_sync("dropship_upload", "success", len(parsed_rows))
+                st.success(f"Imported **{len(parsed_rows)}** dropship rows.")
+                st.rerun()
+
+        except Exception as e:
+            st.error(f"Error reading file: {e}")
+
+    st.markdown("---")
+    with st.expander("⚠️ Clear all dropship data"):
+        st.caption("Removes all dropship orders. Shopify orders are NOT affected.")
+        if st.button("Clear dropship orders", key="clear_dropship_btn"):
+            clear_all_dropship_orders()
+            st.success("All dropship data cleared.")
             st.rerun()
 
 
