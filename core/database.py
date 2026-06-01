@@ -716,6 +716,89 @@ def clear_all_dropship_orders():
         conn.commit()
 
 
+# --- Standard dropship reporting rules (from legacy Excel tracker) ---
+
+DROPSHIP_TARGET_COUNTRIES = ["United States", "Canada", "Australia"]
+DROPSHIP_TARGET_COUNTRY_LABELS = {
+    "United States": "US",
+    "Canada": "CA",
+    "Australia": "AU",
+}
+# Excluded from US numbers — these regions aren't part of the dropship target.
+DROPSHIP_EXCLUDED_REGIONS = ("Hawaii", "Alaska", "Puerto Rico")
+
+
+def _dropship_standard_where():
+    """SQL WHERE fragment + params applying the standard dropship rules:
+       - China warehouse only
+       - Destinations limited to US / CA / AU
+       - US excludes Hawaii, Alaska, Puerto Rico
+    """
+    placeholders = ",".join("?" * len(DROPSHIP_TARGET_COUNTRIES))
+    excl_placeholders = ",".join("?" * len(DROPSHIP_EXCLUDED_REGIONS))
+    where = (
+        f"warehouse = 'China' "
+        f"AND country IN ({placeholders}) "
+        f"AND NOT (country = 'United States' AND region IN ({excl_placeholders}))"
+    )
+    params = list(DROPSHIP_TARGET_COUNTRIES) + list(DROPSHIP_EXCLUDED_REGIONS)
+    return where, params
+
+
+def get_dropship_available_months():
+    """Return distinct YYYY-MM months that have dropship data (under standard rules)."""
+    where, params = _dropship_standard_where()
+    with get_db() as conn:
+        rows = conn.execute(
+            f"SELECT DISTINCT substr(paid_at_local, 1, 7) AS ym "
+            f"FROM dropship_orders WHERE {where} AND paid_at_local IS NOT NULL "
+            f"ORDER BY ym DESC",
+            params,
+        ).fetchall()
+    return [r["ym"] for r in rows if r["ym"]]
+
+
+def get_dropship_monthly_breakdown(start_date=None, end_date=None):
+    """
+    Return rows of (year_month, country, units) under standard dropship rules.
+    Useful for the historical trend chart.
+    """
+    where, params = _dropship_standard_where()
+    if start_date:
+        where += " AND paid_at_local >= ?"
+        params.append(start_date)
+    if end_date:
+        where += " AND paid_at_local <= ?"
+        params.append(end_date)
+    with get_db() as conn:
+        rows = conn.execute(
+            f"SELECT substr(paid_at_local, 1, 7) AS year_month, country, "
+            f"SUM(quantity) AS units "
+            f"FROM dropship_orders WHERE {where} AND paid_at_local IS NOT NULL "
+            f"GROUP BY year_month, country ORDER BY year_month",
+            params,
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_dropship_sku_breakdown_for_month(year_month):
+    """
+    Return SKU × country breakdown for a single month (YYYY-MM string).
+    One row per (erp_sku, shopify_sku, country).
+    """
+    where, params = _dropship_standard_where()
+    where += " AND substr(paid_at_local, 1, 7) = ?"
+    params.append(year_month)
+    with get_db() as conn:
+        rows = conn.execute(
+            f"SELECT erp_sku, shopify_sku, country, SUM(quantity) AS units "
+            f"FROM dropship_orders WHERE {where} "
+            f"GROUP BY erp_sku, shopify_sku, country",
+            params,
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 # --- Raw Weekly Sales (all SKUs, including unmapped) ---
 
 def upsert_raw_weekly_sales(shopify_sku, week_start, week_end, units_sold, source="shopify"):

@@ -8,7 +8,13 @@ from datetime import date, timedelta
 
 from core.database import (
     init_db, get_dropship_orders, get_dropship_summary,
+    get_dropship_monthly_breakdown, get_dropship_sku_breakdown_for_month,
+    get_dropship_available_months,
+    DROPSHIP_TARGET_COUNTRIES, DROPSHIP_TARGET_COUNTRY_LABELS,
+    DROPSHIP_EXCLUDED_REGIONS,
 )
+import plotly.express as px
+from collections import defaultdict
 from core.theme import inject_css, page_header
 from core.auth import check_password
 
@@ -20,11 +26,110 @@ init_db()
 
 page_header(
     "Dropship Orders",
-    "Orders shipped from China (ERP import) — destinations, products, warehouses",
+    "China → US / CA / AU dropshipped units (excl. HI / AK / PR)",
 )
 
 # ---------------------------------------------------------------------------
-# Filters
+# Standard dropship view (replicates legacy Excel tracker)
+# ---------------------------------------------------------------------------
+st.caption(
+    "**Standard dropship rules applied:** China warehouse only · destinations US / CA / AU · "
+    "US excludes Hawaii, Alaska, Puerto Rico."
+)
+
+# --- Monthly trend chart ---
+st.markdown("### 📈 Monthly Dropshipped Units")
+monthly_rows = get_dropship_monthly_breakdown()
+if monthly_rows:
+    # Pivot to month × country
+    months = sorted({r["year_month"] for r in monthly_rows})
+    pivot = defaultdict(lambda: {c: 0 for c in DROPSHIP_TARGET_COUNTRIES})
+    for r in monthly_rows:
+        pivot[r["year_month"]][r["country"]] = r["units"]
+
+    trend_records = []
+    for m in months:
+        row = {"Month": m}
+        total = 0
+        for ctry in DROPSHIP_TARGET_COUNTRIES:
+            label = DROPSHIP_TARGET_COUNTRY_LABELS[ctry]
+            row[label] = pivot[m][ctry]
+            total += pivot[m][ctry]
+        row["Total"] = total
+        trend_records.append(row)
+    trend_df = pd.DataFrame(trend_records)
+
+    # Bar chart (grouped)
+    plot_df = trend_df.melt(
+        id_vars=["Month", "Total"],
+        value_vars=["US", "CA", "AU"],
+        var_name="Country",
+        value_name="Units",
+    )
+    fig = px.bar(
+        plot_df, x="Month", y="Units", color="Country",
+        title="Monthly Dropshipped Units (China → US / CA / AU)",
+        barmode="group",
+        color_discrete_map={"US": "#1E40AF", "CA": "#DC2626", "AU": "#16A34A"},
+        category_orders={"Country": ["US", "CA", "AU"]},
+        text="Units",
+    )
+    fig.update_traces(textposition="outside")
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.dataframe(trend_df, use_container_width=True, hide_index=True)
+else:
+    st.info("No China-shipped orders to US / CA / AU in the database yet.")
+
+st.markdown("---")
+
+# --- Per-month SKU breakdown ---
+st.markdown("### 📊 SKU Breakdown")
+available_months = get_dropship_available_months()
+if available_months:
+    sel_month = st.selectbox(
+        "Month",
+        options=available_months,
+        index=0,  # most recent month first
+        key="ds_month_picker",
+    )
+
+    sku_rows = get_dropship_sku_breakdown_for_month(sel_month)
+    if sku_rows:
+        # Pivot to one row per SKU with US/CA/AU + Total columns
+        sku_pivot = defaultdict(lambda: {"shopify_sku": "", "US": 0, "CA": 0, "AU": 0})
+        for r in sku_rows:
+            key = r["erp_sku"] or "(no ERP SKU)"
+            sku_pivot[key]["shopify_sku"] = r["shopify_sku"] or ""
+            label = DROPSHIP_TARGET_COUNTRY_LABELS[r["country"]]
+            sku_pivot[key][label] += r["units"] or 0
+
+        sku_records = []
+        for erp_sku, data in sku_pivot.items():
+            total = data["US"] + data["CA"] + data["AU"]
+            sku_records.append({
+                "SKU": erp_sku,
+                "Shopify SKU": data["shopify_sku"],
+                "US": data["US"],
+                "CA": data["CA"],
+                "AU": data["AU"],
+                "Total": total,
+            })
+        sku_df = pd.DataFrame(sku_records).sort_values("Total", ascending=False).reset_index(drop=True)
+        total_units = sku_df["Total"].sum()
+        st.caption(f"**{sel_month}** · {len(sku_df)} SKUs · {total_units:,} total units")
+        st.dataframe(sku_df, use_container_width=True, hide_index=True)
+    else:
+        st.info(f"No China-shipped orders to US/CA/AU for {sel_month}.")
+else:
+    st.info("Upload dropship data first via Data Management → Dropship Upload.")
+
+st.markdown("---")
+st.markdown("## 🔍 All Dropship Orders")
+st.caption("Generic filterable view of every dropship row (all warehouses, all destinations).")
+
+# ---------------------------------------------------------------------------
+# Filters (existing generic view)
 # ---------------------------------------------------------------------------
 all_summary = get_dropship_summary()
 if all_summary["total_orders"] == 0:
