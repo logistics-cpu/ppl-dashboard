@@ -227,6 +227,51 @@ def init_db():
                 UNIQUE(shopify_sku, week_start, source)
             );
 
+            CREATE TABLE IF NOT EXISTS orders (
+                shopify_order_id TEXT PRIMARY KEY,
+                order_number TEXT,
+                created_at_utc TIMESTAMP NOT NULL,
+                processed_at_utc TIMESTAMP,
+                created_at_local DATE NOT NULL,
+                financial_status TEXT,
+                fulfillment_status TEXT,
+                source_name TEXT,
+                tags TEXT,
+                total_price REAL,
+                subtotal_price REAL,
+                total_discounts REAL,
+                total_tax REAL,
+                total_shipping REAL,
+                currency TEXT,
+                customer_id_hash TEXT,
+                ship_country TEXT,
+                ship_country_code TEXT,
+                ship_state TEXT,
+                ship_state_code TEXT,
+                ship_city TEXT,
+                synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS order_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                shopify_order_id TEXT NOT NULL,
+                line_item_id TEXT,
+                shopify_sku TEXT,
+                product_title TEXT,
+                variant_title TEXT,
+                quantity INTEGER NOT NULL,
+                unit_price REAL,
+                style TEXT,
+                color TEXT,
+                size TEXT,
+                UNIQUE(shopify_order_id, line_item_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_orders_local_date ON orders(created_at_local);
+            CREATE INDEX IF NOT EXISTS idx_orders_country ON orders(ship_country_code);
+            CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(shopify_order_id);
+            CREATE INDEX IF NOT EXISTS idx_order_items_sku ON order_items(shopify_sku);
+
             CREATE TABLE IF NOT EXISTS inventory_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 style TEXT NOT NULL,
@@ -363,6 +408,87 @@ def upsert_weekly_sales(style, color, size, week_start, week_end, units_sold, so
             DO UPDATE SET units_sold=excluded.units_sold, source=excluded.source
         """, (style, color, size, week_start, week_end, units_sold, source))
         invalidate_cache()
+
+
+# --- Orders & Order Items ---
+
+def upsert_order(order_data):
+    """Insert or replace an order row. order_data is a dict matching the orders table columns."""
+    cols = [
+        "shopify_order_id", "order_number", "created_at_utc", "processed_at_utc",
+        "created_at_local", "financial_status", "fulfillment_status", "source_name",
+        "tags", "total_price", "subtotal_price", "total_discounts", "total_tax",
+        "total_shipping", "currency", "customer_id_hash", "ship_country",
+        "ship_country_code", "ship_state", "ship_state_code", "ship_city",
+    ]
+    placeholders = ",".join("?" * len(cols))
+    sql = f"INSERT OR REPLACE INTO orders ({','.join(cols)}) VALUES ({placeholders})"
+    values = tuple(order_data.get(c) for c in cols)
+    with get_db() as conn:
+        conn.execute(sql, values)
+
+
+def upsert_order_item(item_data):
+    """Insert or replace an order_item row."""
+    cols = [
+        "shopify_order_id", "line_item_id", "shopify_sku", "product_title",
+        "variant_title", "quantity", "unit_price", "style", "color", "size",
+    ]
+    placeholders = ",".join("?" * len(cols))
+    sql = (
+        f"INSERT INTO order_items ({','.join(cols)}) VALUES ({placeholders}) "
+        f"ON CONFLICT(shopify_order_id, line_item_id) DO UPDATE SET "
+        f"quantity=excluded.quantity, unit_price=excluded.unit_price, "
+        f"style=excluded.style, color=excluded.color, size=excluded.size"
+    )
+    values = tuple(item_data.get(c) for c in cols)
+    with get_db() as conn:
+        conn.execute(sql, values)
+
+
+def get_orders(start_date=None, end_date=None, country=None, limit=500):
+    """Fetch orders, optionally filtered. Most recent first."""
+    query = "SELECT * FROM orders WHERE 1=1"
+    params = []
+    if start_date:
+        query += " AND created_at_local >= ?"
+        params.append(start_date)
+    if end_date:
+        query += " AND created_at_local <= ?"
+        params.append(end_date)
+    if country:
+        query += " AND ship_country_code = ?"
+        params.append(country)
+    query += " ORDER BY created_at_local DESC, created_at_utc DESC LIMIT ?"
+    params.append(limit)
+    with get_db() as conn:
+        return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+
+def get_order_items(shopify_order_id):
+    """Fetch all line items for a given order."""
+    with get_db() as conn:
+        return [
+            dict(r) for r in conn.execute(
+                "SELECT * FROM order_items WHERE shopify_order_id = ?",
+                (shopify_order_id,),
+            ).fetchall()
+        ]
+
+
+def get_orders_count(start_date=None, end_date=None):
+    """Count orders in date range."""
+    query = "SELECT COUNT(*) AS n FROM orders WHERE 1=1"
+    params = []
+    if start_date:
+        query += " AND created_at_local >= ?"
+        params.append(start_date)
+    if end_date:
+        query += " AND created_at_local <= ?"
+        params.append(end_date)
+    with get_db() as conn:
+        row = conn.execute(query, params).fetchone()
+        return row["n"] if row else 0
 
 
 # --- Raw Weekly Sales (all SKUs, including unmapped) ---
@@ -601,6 +727,15 @@ def clear_all_sales():
     invalidate_cache()
 
 
+def clear_all_orders():
+    """Delete ALL order-level data."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM order_items")
+        conn.execute("DELETE FROM orders")
+        conn.commit()
+    invalidate_cache()
+
+
 def clear_all_inventory():
     """Delete ALL inventory snapshots."""
     with get_db() as conn:
@@ -609,10 +744,12 @@ def clear_all_inventory():
 
 
 def clear_all_data():
-    """Delete ALL data: sales, raw sales, inventory, arrivals, transfers, sync logs."""
+    """Delete ALL data: sales, raw, orders, inventory, arrivals, transfers, sync logs."""
     with get_db() as conn:
         conn.execute("DELETE FROM weekly_sales")
         conn.execute("DELETE FROM raw_weekly_sales")
+        conn.execute("DELETE FROM order_items")
+        conn.execute("DELETE FROM orders")
         conn.execute("DELETE FROM inventory_snapshots")
         conn.execute("DELETE FROM production_arrivals")
         conn.execute("DELETE FROM warehouse_transfers")

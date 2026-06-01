@@ -3,12 +3,14 @@
 from datetime import datetime, timedelta
 from collections import defaultdict
 import pytz
+import hashlib
 from shopify_client.client import ShopifyClient
-from shopify_client.queries import PRODUCTS_QUERY, ORDERS_QUERY
+from shopify_client.queries import PRODUCTS_QUERY, ORDERS_QUERY, ORDERS_DETAIL_QUERY
 from core.sku_mapper import parse_shopify_sku
 from core.database import (
     upsert_weekly_sales, get_db,
     upsert_raw_weekly_sales, derive_weekly_sales_from_raw,
+    upsert_order, upsert_order_item,
 )
 
 # Shopify store timezone — Sydney observes AEDT (UTC+11) Oct-Apr, AEST (UTC+10) Apr-Oct
@@ -166,3 +168,121 @@ def sync_weekly_sales(start_date, end_date):
     derive_weekly_sales_from_raw(start_date=req_week_start.isoformat(), end_date=end_date)
 
     return raw_count
+
+
+def _money(node, *path):
+    """Safely extract a money amount from nested dict path. Returns float or None."""
+    cur = node
+    for p in path:
+        if not isinstance(cur, dict) or cur.get(p) is None:
+            return None
+        cur = cur[p]
+    try:
+        return float(cur)
+    except (TypeError, ValueError):
+        return None
+
+
+def _hash_customer_id(customer):
+    """Hash the Shopify customer GID for anonymized dedup. Returns None if no customer."""
+    if not customer or not customer.get("id"):
+        return None
+    return hashlib.sha256(customer["id"].encode("utf-8")).hexdigest()[:16]
+
+
+def sync_orders(start_date, end_date):
+    """
+    Fetch full order details from Shopify for analytics (geo, channel, basket).
+
+    Stores into `orders` and `order_items` tables. Does NOT modify weekly_sales —
+    that's handled by sync_weekly_sales().
+
+    Args:
+        start_date: ISO date string (e.g., "2026-05-01")
+        end_date: ISO date string (e.g., "2026-05-25")
+
+    Returns: (orders_synced, items_synced)
+    """
+    client = ShopifyClient()
+
+    from datetime import date as date_cls
+    buf_start = (date_cls.fromisoformat(start_date) - timedelta(days=1)).isoformat()
+    buf_end = (date_cls.fromisoformat(end_date) + timedelta(days=1)).isoformat()
+
+    orders_synced = 0
+    items_synced = 0
+
+    # Three-pass approach to match Shopify's report logic and capture refunded orders too.
+    for fin_status in ("paid", "partially_refunded", "refunded"):
+        query_str = (
+            f"created_at:>={buf_start} created_at:<={buf_end} "
+            f"financial_status:{fin_status} -status:cancelled"
+        )
+        edges = client.paginate(
+            ORDERS_DETAIL_QUERY,
+            variables={"query": query_str},
+            path_to_edges="orders.edges",
+            path_to_page_info="orders.pageInfo",
+        )
+
+        for edge in edges:
+            order = edge["node"]
+            # Local date for filtering
+            ts = order.get("processedAt") or order["createdAt"]
+            utc_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            local_dt = utc_dt.astimezone(STORE_TZ)
+            local_date = local_dt.date()
+
+            # Skip orders outside requested range (buffer may include extras)
+            if local_date.isoformat() < start_date or local_date.isoformat() > end_date:
+                continue
+
+            ship = order.get("shippingAddress") or {}
+            order_row = {
+                "shopify_order_id": order["id"],
+                "order_number": order.get("name"),
+                "created_at_utc": order["createdAt"],
+                "processed_at_utc": order.get("processedAt"),
+                "created_at_local": local_date.isoformat(),
+                "financial_status": order.get("displayFinancialStatus"),
+                "fulfillment_status": order.get("displayFulfillmentStatus"),
+                "source_name": order.get("sourceName"),
+                "tags": ",".join(order.get("tags") or []),
+                "total_price": _money(order, "currentTotalPriceSet", "presentmentMoney", "amount"),
+                "subtotal_price": _money(order, "currentSubtotalPriceSet", "presentmentMoney", "amount"),
+                "total_discounts": _money(order, "currentTotalDiscountsSet", "presentmentMoney", "amount"),
+                "total_tax": _money(order, "currentTotalTaxSet", "presentmentMoney", "amount"),
+                "total_shipping": _money(order, "totalShippingPriceSet", "presentmentMoney", "amount"),
+                "currency": (order.get("currentTotalPriceSet") or {}).get("presentmentMoney", {}).get("currencyCode"),
+                "customer_id_hash": _hash_customer_id(order.get("customer")),
+                "ship_country": ship.get("country"),
+                "ship_country_code": ship.get("countryCodeV2"),
+                "ship_state": ship.get("province"),
+                "ship_state_code": ship.get("provinceCode"),
+                "ship_city": ship.get("city"),
+            }
+            upsert_order(order_row)
+            orders_synced += 1
+
+            # Line items
+            for item_edge in order.get("lineItems", {}).get("edges", []):
+                li = item_edge["node"]
+                sku = (li.get("sku") or "").strip()
+                parsed = parse_shopify_sku(sku) if sku else None
+                style, color, size = parsed if parsed else (None, None, None)
+                item_row = {
+                    "shopify_order_id": order["id"],
+                    "line_item_id": li.get("id"),
+                    "shopify_sku": sku,
+                    "product_title": li.get("name"),
+                    "variant_title": li.get("variantTitle"),
+                    "quantity": li.get("quantity", 0),
+                    "unit_price": _money(li, "originalUnitPriceSet", "presentmentMoney", "amount"),
+                    "style": style,
+                    "color": color,
+                    "size": size,
+                }
+                upsert_order_item(item_row)
+                items_synced += 1
+
+    return (orders_synced, items_synced)
