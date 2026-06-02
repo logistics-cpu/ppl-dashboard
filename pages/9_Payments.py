@@ -160,17 +160,28 @@ st.markdown("### 📈 Monthly Trend")
 month_cat_rows = get_payment_summary_by_month_category(
     start_ym=start_ym, end_ym=end_ym, include_stock=include_stock,
 )
+def _fmt_month(ym):
+    """Format 'YYYY-MM' as e.g. 'Jan ‘26' for chart axes."""
+    try:
+        return pd.to_datetime(ym + "-01").strftime("%b ‘%y")
+    except Exception:
+        return ym
+
 if month_cat_rows:
     df_mc = pd.DataFrame(month_cat_rows)
     df_mc["category"] = df_mc["category"].fillna("(Uncategorized)")
+    df_mc["Month"] = df_mc["year_month"].apply(_fmt_month)
+    month_order = sorted(df_mc["year_month"].unique())
+    month_label_order = [_fmt_month(m) for m in month_order]
 
     fig_trend = px.bar(
-        df_mc, x="year_month", y="total", color="category",
+        df_mc, x="Month", y="total", color="category",
         title="Monthly Spend by Category",
-        labels={"year_month": "Month", "total": "Amount ($)", "category": "Category"},
+        labels={"Month": "Month", "total": "Amount ($)", "category": "Category"},
         barmode="stack",
+        category_orders={"Month": month_label_order},
     )
-    fig_trend.update_layout(legend_title_text="Category")
+    fig_trend.update_layout(legend_title_text="Category", xaxis_type="category")
     st.plotly_chart(fig_trend, use_container_width=True)
 else:
     st.info("No monthly data.")
@@ -186,13 +197,21 @@ month_ctry_rows = get_payment_summary_by_month_country(
 )
 if month_ctry_rows:
     df_mt = pd.DataFrame(month_ctry_rows)
+    df_mt["Month"] = df_mt["year_month"].apply(_fmt_month)
+    ctry_month_order = sorted(df_mt["year_month"].unique())
+    ctry_month_label_order = [_fmt_month(m) for m in ctry_month_order]
+
     fig_ctry = px.bar(
-        df_mt, x="year_month", y="total", color="country",
+        df_mt, x="Month", y="total", color="country",
         barmode="group",
         title="Monthly Spend by Country",
-        labels={"year_month": "Month", "total": "Amount ($)", "country": "Country"},
-        category_orders={"country": ["US", "CA", "AU", "Other", "Unknown"]},
+        labels={"Month": "Month", "total": "Amount ($)", "country": "Country"},
+        category_orders={
+            "Month": ctry_month_label_order,
+            "country": ["US", "CA", "AU", "Other", "Unknown"],
+        },
     )
+    fig_ctry.update_layout(xaxis_type="category")
     st.plotly_chart(fig_ctry, use_container_width=True)
 else:
     st.info("No country breakdown.")
