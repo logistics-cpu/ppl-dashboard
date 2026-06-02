@@ -13,6 +13,8 @@ from core.database import (
     upsert_weekly_sales, get_last_sync,
     clear_all_sales, clear_all_inventory, clear_all_data,
     get_unmapped_raw_skus, derive_weekly_sales_from_raw,
+    insert_payment_rows_bulk, delete_payments_in_range,
+    clear_all_payments, PAYMENT_CATEGORIES, PAYMENT_COUNTRY_MAP,
 )
 from erp.parser import parse_erp_excel
 from core.auth import check_password
@@ -720,11 +722,6 @@ with tab_payments:
         </div>
     </div>
     """, unsafe_allow_html=True)
-
-    from core.database import (
-        insert_payment_rows_bulk, delete_payments_in_range,
-        clear_all_payments, PAYMENT_CATEGORIES, PAYMENT_COUNTRY_MAP,
-    )
 
     pay_file = st.file_uploader(
         "Upload Payments Excel",
