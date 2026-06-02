@@ -298,6 +298,23 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_dropship_country ON dropship_orders(country);
             CREATE INDEX IF NOT EXISTS idx_dropship_order_num ON dropship_orders(order_number);
 
+            CREATE TABLE IF NOT EXISTS payments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                payment_date DATE,
+                year_month TEXT NOT NULL,
+                amount REAL NOT NULL,
+                description TEXT,
+                category TEXT,
+                country TEXT,
+                has_invoice INTEGER NOT NULL DEFAULT 0,
+                source_file TEXT,
+                uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_payments_month ON payments(year_month);
+            CREATE INDEX IF NOT EXISTS idx_payments_category ON payments(category);
+            CREATE INDEX IF NOT EXISTS idx_payments_country ON payments(country);
+
             CREATE TABLE IF NOT EXISTS inventory_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 style TEXT NOT NULL,
@@ -713,6 +730,179 @@ def clear_all_dropship_orders():
     """Delete ALL dropship rows."""
     with get_db() as conn:
         conn.execute("DELETE FROM dropship_orders")
+        conn.commit()
+
+
+# --- Payments (invoice tracking from finance Excel) ---
+
+# Category registry — based on the 'Categories' sheet of the legacy tracker.
+# has_invoice indicates whether the China agency issues a formal invoice for it.
+PAYMENT_CATEGORIES = {
+    "Stock payments":              {"has_invoice": False, "is_stock_payment": True},
+    "Product costs":               {"has_invoice": False},
+    "Shipping costs":              {"has_invoice": False},
+    "4PX Invoice":                 {"has_invoice": True},
+    "Dropshipping Invoice":        {"has_invoice": True},
+    "Fedex Private Address Fee":   {"has_invoice": True},
+    "Inbound":                     {"has_invoice": False},
+    "Refunds":                     {"has_invoice": False},
+    "Rent":                        {"has_invoice": False},
+    "Supplies":                    {"has_invoice": False},
+    "Other Cost - Packaging Cost": {"has_invoice": False},
+}
+
+# Country codes used in the legacy Excel
+PAYMENT_COUNTRY_MAP = {
+    "US": "US",
+    "USA": "US",
+    "United States": "US",
+    "CA": "CA",
+    "Canada": "CA",
+    "AUS": "AU",
+    "AU": "AU",
+    "Australia": "AU",
+    "Other": "Other",
+}
+
+
+def insert_payment_rows_bulk(rows, batch_size=200):
+    """Bulk insert payment rows (one INSERT per batch_size rows)."""
+    if not rows:
+        return 0
+    cols = [
+        "payment_date", "year_month", "amount", "description",
+        "category", "country", "has_invoice", "source_file",
+    ]
+    one = "(" + ",".join("?" * len(cols)) + ")"
+    inserted = 0
+    with get_db() as conn:
+        for i in range(0, len(rows), batch_size):
+            chunk = rows[i:i + batch_size]
+            multi = ",".join([one] * len(chunk))
+            sql = f"INSERT INTO payments ({','.join(cols)}) VALUES {multi}"
+            flat = []
+            for r in chunk:
+                for c in cols:
+                    flat.append(r.get(c))
+            conn.execute(sql, flat)
+            inserted += len(chunk)
+    return inserted
+
+
+def delete_payments_in_range(start_ym, end_ym):
+    """Delete payment rows where year_month is between start_ym and end_ym (YYYY-MM)."""
+    with get_db() as conn:
+        conn.execute(
+            "DELETE FROM payments WHERE year_month BETWEEN ? AND ?",
+            (start_ym, end_ym),
+        )
+        conn.commit()
+
+
+def get_payments(start_ym=None, end_ym=None, category=None, country=None,
+                 include_stock=True, limit=5000):
+    """Fetch payment rows, optionally filtered."""
+    query = "SELECT * FROM payments WHERE 1=1"
+    params = []
+    if start_ym:
+        query += " AND year_month >= ?"
+        params.append(start_ym)
+    if end_ym:
+        query += " AND year_month <= ?"
+        params.append(end_ym)
+    if category:
+        query += " AND category = ?"
+        params.append(category)
+    if country:
+        query += " AND country = ?"
+        params.append(country)
+    if not include_stock:
+        query += " AND category != 'Stock payments'"
+    query += " ORDER BY year_month DESC, payment_date DESC LIMIT ?"
+    params.append(limit)
+    with get_db() as conn:
+        return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+
+def get_payment_summary_by_category(start_ym=None, end_ym=None,
+                                     include_stock=True):
+    """Return total amount per category in the date range."""
+    where = "1=1"
+    params = []
+    if start_ym:
+        where += " AND year_month >= ?"
+        params.append(start_ym)
+    if end_ym:
+        where += " AND year_month <= ?"
+        params.append(end_ym)
+    if not include_stock:
+        where += " AND category != 'Stock payments'"
+    with get_db() as conn:
+        return [dict(r) for r in conn.execute(
+            f"SELECT category, SUM(amount) AS total, COUNT(*) AS n "
+            f"FROM payments WHERE {where} GROUP BY category "
+            f"ORDER BY ABS(SUM(amount)) DESC",
+            params,
+        ).fetchall()]
+
+
+def get_payment_summary_by_month_category(start_ym=None, end_ym=None,
+                                           include_stock=True):
+    """Return rows of (year_month, category, total) for monthly comparison."""
+    where = "1=1"
+    params = []
+    if start_ym:
+        where += " AND year_month >= ?"
+        params.append(start_ym)
+    if end_ym:
+        where += " AND year_month <= ?"
+        params.append(end_ym)
+    if not include_stock:
+        where += " AND category != 'Stock payments'"
+    with get_db() as conn:
+        return [dict(r) for r in conn.execute(
+            f"SELECT year_month, category, SUM(amount) AS total "
+            f"FROM payments WHERE {where} GROUP BY year_month, category "
+            f"ORDER BY year_month",
+            params,
+        ).fetchall()]
+
+
+def get_payment_summary_by_month_country(start_ym=None, end_ym=None,
+                                          include_stock=True):
+    """Return rows of (year_month, country, total) for country trends."""
+    where = "1=1"
+    params = []
+    if start_ym:
+        where += " AND year_month >= ?"
+        params.append(start_ym)
+    if end_ym:
+        where += " AND year_month <= ?"
+        params.append(end_ym)
+    if not include_stock:
+        where += " AND category != 'Stock payments'"
+    with get_db() as conn:
+        return [dict(r) for r in conn.execute(
+            f"SELECT year_month, COALESCE(country, 'Unknown') AS country, "
+            f"SUM(amount) AS total FROM payments WHERE {where} "
+            f"GROUP BY year_month, country ORDER BY year_month",
+            params,
+        ).fetchall()]
+
+
+def get_payment_available_months():
+    """Return list of YYYY-MM months that have payment data."""
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT year_month FROM payments ORDER BY year_month DESC"
+        ).fetchall()
+    return [r["year_month"] for r in rows if r["year_month"]]
+
+
+def clear_all_payments():
+    """Delete ALL payment rows."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM payments")
         conn.commit()
 
 

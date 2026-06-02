@@ -172,11 +172,12 @@ st.markdown("""
 # Tabs
 # ---------------------------------------------------------------------------
 (
-    tab_shopify, tab_dropship, tab_discovery, tab_erp,
+    tab_shopify, tab_dropship, tab_payments, tab_discovery, tab_erp,
     tab_arrivals, tab_transfers, tab_settings, tab_danger,
 ) = st.tabs([
     "Shopify Sync",
     "Dropship Upload",
+    "Payments Upload",
     "SKU Discovery",
     "ERP Upload",
     "Production Arrivals",
@@ -699,6 +700,187 @@ with tab_dropship:
         if st.button("Clear dropship orders", key="clear_dropship_btn"):
             clear_all_dropship_orders()
             st.success("All dropship data cleared.")
+            st.rerun()
+
+
+# ─── Payments Upload ──────────────────────────────────────────────────────
+with tab_payments:
+    st.markdown("""
+    <div class="dm-section">
+        <div class="dm-section-title">Payments / Invoice Upload</div>
+        <div class="dm-section-desc">
+            Upload the finance tracking Excel (e.g. <code>payment (Albert).xlsx</code>).
+            We read the transaction sheet — expected columns:<br>
+            <code>Date</code>, <code>Month</code>, <code>Amount</code>,
+            <code>Discription</code>, <code>GL</code> (category),
+            <code>Country</code>.<br><br>
+            On import, existing rows in the file's month range are <b>replaced</b>.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    from core.database import (
+        insert_payment_rows_bulk, delete_payments_in_range,
+        clear_all_payments, PAYMENT_CATEGORIES, PAYMENT_COUNTRY_MAP,
+    )
+
+    pay_file = st.file_uploader(
+        "Upload Payments Excel",
+        type=["xlsx", "xls"],
+        key="payments_upload",
+        help="The finance tracker .xlsx with Date/Month/Amount/GL/Country columns.",
+    )
+
+    pay_sheet = st.text_input(
+        "Sheet name to import",
+        value="Babybub NEW",
+        key="payments_sheet_name",
+        help="Name of the sheet that contains the raw transactions.",
+    )
+
+    if pay_file:
+        try:
+            pay_df = pd.read_excel(pay_file, sheet_name=pay_sheet)
+
+            # Required columns. The legacy file uses 'Discription' (sic).
+            required = ["Date", "Month", "Amount"]
+            missing = [c for c in required if c not in pay_df.columns]
+            if missing:
+                st.error(
+                    f"Sheet `{pay_sheet}` is missing required columns: {', '.join(missing)}. "
+                    f"Found: {list(pay_df.columns)}"
+                )
+                st.stop()
+
+            desc_col = "Discription" if "Discription" in pay_df.columns else "Description"
+            gl_col = "GL" if "GL" in pay_df.columns else "Category"
+            country_col = "Country" if "Country" in pay_df.columns else None
+
+            parsed_rows = []
+            skipped = 0
+            for _, r in pay_df.iterrows():
+                amount = r.get("Amount")
+                if pd.isna(amount):
+                    skipped += 1
+                    continue
+                try:
+                    amount = float(amount)
+                except (TypeError, ValueError):
+                    skipped += 1
+                    continue
+
+                month_val = r.get("Month")
+                if pd.isna(month_val):
+                    skipped += 1
+                    continue
+                month_dt = pd.to_datetime(month_val, errors="coerce")
+                if pd.isna(month_dt):
+                    skipped += 1
+                    continue
+                year_month = month_dt.strftime("%Y-%m")
+
+                date_val = r.get("Date")
+                date_iso = None
+                if pd.notna(date_val):
+                    date_dt = pd.to_datetime(date_val, errors="coerce")
+                    if pd.notna(date_dt):
+                        # The "Date" column often lacks a year — patch from Month.
+                        if date_dt.year == 1900:
+                            date_dt = date_dt.replace(year=month_dt.year)
+                        date_iso = date_dt.date().isoformat()
+                if date_iso is None:
+                    date_iso = month_dt.date().isoformat()
+
+                category_raw = r.get(gl_col) if gl_col in pay_df.columns else None
+                category = (
+                    str(category_raw).strip() if pd.notna(category_raw) else None
+                )
+                has_inv = int(
+                    PAYMENT_CATEGORIES.get(category, {}).get("has_invoice", False)
+                ) if category else 0
+
+                country_raw = r.get(country_col) if country_col else None
+                country = (
+                    PAYMENT_COUNTRY_MAP.get(
+                        str(country_raw).strip() if pd.notna(country_raw) else "",
+                        str(country_raw).strip() if pd.notna(country_raw) else None,
+                    )
+                )
+
+                desc_val = r.get(desc_col) if desc_col in pay_df.columns else None
+                description = (
+                    str(desc_val).strip() if pd.notna(desc_val) else None
+                )
+
+                parsed_rows.append({
+                    "payment_date": date_iso,
+                    "year_month": year_month,
+                    "amount": amount,
+                    "description": description,
+                    "category": category,
+                    "country": country,
+                    "has_invoice": has_inv,
+                    "source_file": pay_file.name,
+                })
+
+            if not parsed_rows:
+                st.warning(f"No valid payment rows parsed. ({skipped} rows skipped.)")
+                st.stop()
+
+            months_seen = sorted({r["year_month"] for r in parsed_rows})
+            total_positive = sum(r["amount"] for r in parsed_rows if r["amount"] > 0)
+            total_negative = sum(r["amount"] for r in parsed_rows if r["amount"] < 0)
+            categorized = sum(1 for r in parsed_rows if r["category"])
+
+            st.success(
+                f"Parsed **{len(parsed_rows)}** rows · "
+                f"{len(months_seen)} months ({months_seen[0]} → {months_seen[-1]}) · "
+                f"{skipped} rows skipped"
+            )
+            st.caption(
+                f"Outflows (positive): ${total_positive:,.2f}  ·  "
+                f"Negatives (refunds / deposits): ${total_negative:,.2f}  ·  "
+                f"{categorized} rows with category"
+            )
+
+            # Preview
+            preview_df = pd.DataFrame([
+                {
+                    "Date": r["payment_date"],
+                    "Month": r["year_month"],
+                    "Amount": r["amount"],
+                    "Category": r["category"] or "(uncategorized)",
+                    "Country": r["country"] or "—",
+                    "Description": (r["description"] or "")[:60],
+                }
+                for r in parsed_rows[:50]
+            ])
+            with st.expander(f"Preview first 50 of {len(parsed_rows)} rows"):
+                st.dataframe(preview_df, use_container_width=True, hide_index=True)
+
+            st.warning(
+                f"Importing will **replace** existing payments where year_month is "
+                f"between **{months_seen[0]}** and **{months_seen[-1]}**, then insert these "
+                f"{len(parsed_rows)} rows."
+            )
+
+            if st.button("Import Payments", type="primary", key="import_payments"):
+                with st.spinner(f"Importing {len(parsed_rows)} rows..."):
+                    delete_payments_in_range(months_seen[0], months_seen[-1])
+                    n = insert_payment_rows_bulk(parsed_rows, batch_size=200)
+                log_sync("payments_upload", "success", n)
+                st.success(f"Imported **{n}** payment rows.")
+                st.rerun()
+
+        except Exception as e:
+            st.error(f"Error reading file: {e}")
+
+    st.markdown("---")
+    with st.expander("⚠️ Clear all payment data"):
+        st.caption("Removes all payment rows. Other data is NOT affected.")
+        if st.button("Clear payments", key="clear_payments_btn"):
+            clear_all_payments()
+            st.success("All payment data cleared.")
             st.rerun()
 
 
