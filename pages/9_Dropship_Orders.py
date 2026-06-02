@@ -9,7 +9,7 @@ from datetime import date, timedelta
 from core.database import (
     init_db, get_dropship_orders, get_dropship_summary,
     get_dropship_monthly_breakdown, get_dropship_sku_breakdown_for_month,
-    get_dropship_available_months,
+    get_dropship_available_months, get_dropship_vs_local_monthly,
     DROPSHIP_TARGET_COUNTRIES, DROPSHIP_TARGET_COUNTRY_LABELS,
     DROPSHIP_EXCLUDED_REGIONS,
 )
@@ -80,6 +80,94 @@ if monthly_rows:
     st.dataframe(trend_df, use_container_width=True, hide_index=True)
 else:
     st.info("No China-shipped orders to US / CA / AU in the database yet.")
+
+st.markdown("---")
+
+# --- Dropshipped vs Local Shipping comparison ---
+st.markdown("### 🌐 Dropshipped vs Local Shipping")
+st.caption(
+    "China (默认仓库 + 东莞爆品仓) vs local warehouses, per destination. "
+    "Hawaii / Alaska / Puerto Rico excluded from US."
+)
+
+vs_rows = get_dropship_vs_local_monthly()
+if vs_rows:
+    months_seen = sorted({r["year_month"] for r in vs_rows})
+
+    # Pivot: (year_month, country, origin_type) → units
+    vs_pivot = defaultdict(int)
+    for r in vs_rows:
+        vs_pivot[(r["year_month"], r["country"], r["origin_type"])] = r["units"] or 0
+
+    # One stacked / grouped chart per destination country, in tabs
+    dest_tab_labels = [
+        f"🇺🇸 US" if c == "United States" else
+        f"🇨🇦 CA" if c == "Canada" else
+        f"🇦🇺 AU"
+        for c in DROPSHIP_TARGET_COUNTRIES
+    ]
+    dest_tabs = st.tabs(dest_tab_labels)
+
+    for di, country in enumerate(DROPSHIP_TARGET_COUNTRIES):
+        with dest_tabs[di]:
+            records = []
+            for m in months_seen:
+                dropship = vs_pivot[(m, country, "Dropship")]
+                local = vs_pivot[(m, country, "Local")]
+                total = dropship + local
+                pct_dropship = (dropship / total * 100) if total else 0
+                records.append({
+                    "Month": m,
+                    "Dropship (China)": dropship,
+                    "Local": local,
+                    "Total": total,
+                    "% Dropship": f"{pct_dropship:.0f}%",
+                })
+            vs_df = pd.DataFrame(records)
+            # Skip months with no data for this destination
+            vs_df = vs_df[vs_df["Total"] > 0].reset_index(drop=True)
+
+            if vs_df.empty:
+                st.info(f"No data for {DROPSHIP_TARGET_COUNTRY_LABELS[country]} in the database.")
+                continue
+
+            # Grouped bar chart
+            plot_df = vs_df.melt(
+                id_vars=["Month"],
+                value_vars=["Dropship (China)", "Local"],
+                var_name="Origin",
+                value_name="Units",
+            )
+            label = DROPSHIP_TARGET_COUNTRY_LABELS[country]
+            fig_vs = px.bar(
+                plot_df, x="Month", y="Units", color="Origin",
+                title=f"{label}: Dropshipped vs Local Shipping",
+                barmode="group",
+                color_discrete_map={"Dropship (China)": "#DC2626", "Local": "#1E40AF"},
+                category_orders={"Origin": ["Dropship (China)", "Local"]},
+                text="Units",
+            )
+            fig_vs.update_traces(textposition="outside")
+            st.plotly_chart(fig_vs, use_container_width=True, key=f"vs_{label}")
+
+            # Append a Total row at the bottom
+            totals_row = {
+                "Month": "📊 Total",
+                "Dropship (China)": int(vs_df["Dropship (China)"].sum()),
+                "Local": int(vs_df["Local"].sum()),
+                "Total": int(vs_df["Total"].sum()),
+            }
+            grand_total = totals_row["Total"]
+            totals_row["% Dropship"] = (
+                f"{(totals_row['Dropship (China)'] / grand_total * 100):.0f}%"
+                if grand_total else "0%"
+            )
+            vs_df_with_total = pd.concat(
+                [vs_df, pd.DataFrame([totals_row])], ignore_index=True,
+            )
+            st.dataframe(vs_df_with_total, use_container_width=True, hide_index=True)
+else:
+    st.info("No data to compare yet.")
 
 st.markdown("---")
 

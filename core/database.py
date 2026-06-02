@@ -781,6 +781,62 @@ def get_dropship_monthly_breakdown(start_date=None, end_date=None):
     return [dict(r) for r in rows]
 
 
+def get_dropship_vs_local_monthly(start_date=None, end_date=None):
+    """
+    Compare dropshipped (from China) vs locally shipped units for each
+    target destination (US / CA / AU), grouped by month.
+
+    Local warehouse mapping:
+      US destination → US LA, US NJ, US East (China Post), US West (China Post)
+      CA destination → Canada warehouse
+      AU destination → Australia warehouse
+      China warehouse → always Dropship
+
+    HI / AK / PR still excluded from US destination (matches the rest of the page).
+
+    Returns rows of (year_month, country, origin_type, units) where
+    origin_type is 'Dropship' or 'Local'.
+    """
+    where = (
+        "country IN ('United States', 'Canada', 'Australia') "
+        "AND NOT (country = 'United States' "
+        "         AND region IN ('Hawaii', 'Alaska', 'Puerto Rico'))"
+    )
+    params = []
+    if start_date:
+        where += " AND paid_at_local >= ?"
+        params.append(start_date)
+    if end_date:
+        where += " AND paid_at_local <= ?"
+        params.append(end_date)
+
+    # Classify each row's origin as Dropship / Local / Other.
+    # Only "Dropship" and "Local" rows are useful — "Other" (e.g. US order from
+    # Australia warehouse) is rare/edge-case and is filtered out in Python.
+    sql = f"""
+        SELECT substr(paid_at_local, 1, 7) AS year_month,
+               country,
+               CASE
+                   WHEN warehouse = 'China' THEN 'Dropship'
+                   WHEN country = 'United States'
+                        AND warehouse IN ('US LA', 'US NJ',
+                                          'US East (China Post)',
+                                          'US West (China Post)') THEN 'Local'
+                   WHEN country = 'Canada' AND warehouse = 'Canada' THEN 'Local'
+                   WHEN country = 'Australia' AND warehouse = 'Australia' THEN 'Local'
+                   ELSE 'Other'
+               END AS origin_type,
+               SUM(quantity) AS units
+        FROM dropship_orders
+        WHERE {where} AND paid_at_local IS NOT NULL
+        GROUP BY year_month, country, origin_type
+        ORDER BY year_month
+    """
+    with get_db() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [dict(r) for r in rows if r["origin_type"] in ("Dropship", "Local")]
+
+
 def get_dropship_sku_breakdown_for_month(year_month):
     """
     Return SKU × country breakdown for a single month (YYYY-MM string).
