@@ -214,7 +214,7 @@ if month_ctry_rows:
         labels={"Month": "Month", "total": "Amount ($)", "country": "Country"},
         category_orders={
             "Month": ctry_month_label_order,
-            "country": ["US", "CA", "AU", "Other", "Unknown"],
+            "country": ["US", "UK", "CA", "AU", "Other", "Unknown"],
         },
     )
     fig_ctry.update_layout(xaxis_type="category")
