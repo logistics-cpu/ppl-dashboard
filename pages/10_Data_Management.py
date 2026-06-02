@@ -714,6 +714,8 @@ with tab_payments:
             <code>Date</code>, <code>Month</code>, <code>Amount</code>,
             <code>Discription</code>, <code>GL</code> (category),
             <code>Country</code>.<br><br>
+            <b>Only data from the current calendar year onwards is imported</b>
+            — older months in the file are skipped.<br><br>
             On import, existing rows in the file's month range are <b>replaced</b>.
         </div>
     </div>
@@ -756,8 +758,12 @@ with tab_payments:
             gl_col = "GL" if "GL" in pay_df.columns else "Category"
             country_col = "Country" if "Country" in pay_df.columns else None
 
+            # Year cutoff: only import data from the start of the current year.
+            current_year = date.today().year
+
             parsed_rows = []
             skipped = 0
+            skipped_old_years = 0
             for _, r in pay_df.iterrows():
                 amount = r.get("Amount")
                 if pd.isna(amount):
@@ -776,6 +782,10 @@ with tab_payments:
                 month_dt = pd.to_datetime(month_val, errors="coerce")
                 if pd.isna(month_dt):
                     skipped += 1
+                    continue
+                # Skip rows from before the current calendar year
+                if month_dt.year < current_year:
+                    skipped_old_years += 1
                     continue
                 year_month = month_dt.strftime("%Y-%m")
 
@@ -824,7 +834,10 @@ with tab_payments:
                 })
 
             if not parsed_rows:
-                st.warning(f"No valid payment rows parsed. ({skipped} rows skipped.)")
+                st.warning(
+                    f"No valid payment rows parsed. "
+                    f"({skipped} rows skipped, {skipped_old_years} pre-{current_year} rows skipped.)"
+                )
                 st.stop()
 
             months_seen = sorted({r["year_month"] for r in parsed_rows})
@@ -835,8 +848,13 @@ with tab_payments:
             st.success(
                 f"Parsed **{len(parsed_rows)}** rows · "
                 f"{len(months_seen)} months ({months_seen[0]} → {months_seen[-1]}) · "
-                f"{skipped} rows skipped"
+                f"{skipped} invalid rows skipped"
             )
+            if skipped_old_years > 0:
+                st.info(
+                    f"📅 **{skipped_old_years} rows from before {current_year}** "
+                    f"were skipped — only data from this year onwards is imported."
+                )
             st.caption(
                 f"Outflows (positive): ${total_positive:,.2f}  ·  "
                 f"Negatives (refunds / deposits): ${total_negative:,.2f}  ·  "
