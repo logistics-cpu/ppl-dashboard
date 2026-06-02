@@ -40,24 +40,54 @@ if not available_months:
     st.stop()
 
 # ---------------------------------------------------------------------------
-# Filters
+# Filters — single Period dropdown (current month, rolling windows, individual months)
 # ---------------------------------------------------------------------------
-filt_c1, filt_c2, filt_c3 = st.columns([2, 2, 2])
+def _months_back(n):
+    """Return the YYYY-MM that is n calendar months before today."""
+    today = date.today()
+    y, m = today.year, today.month - n
+    while m <= 0:
+        m += 12
+        y -= 1
+    return f"{y:04d}-{m:02d}"
+
+
+def _fmt_ym_long(ym):
+    """'2026-05' → 'May 2026' for the period dropdown."""
+    try:
+        return pd.to_datetime(ym + "-01").strftime("%B %Y")
+    except Exception:
+        return ym
+
+
+current_ym = date.today().strftime("%Y-%m")
+
+period_options = ["This Month", "Last 3 Months", "Last 6 Months",
+                  "Last 9 Months", "Last 12 Months"]
+period_ranges = {
+    "This Month":     (current_ym, current_ym),
+    "Last 3 Months":  (_months_back(2),  current_ym),
+    "Last 6 Months":  (_months_back(5),  current_ym),
+    "Last 9 Months":  (_months_back(8),  current_ym),
+    "Last 12 Months": (_months_back(11), current_ym),
+}
+
+# Append every individual month that has data, formatted as 'May 2026'
+for _ym in available_months:
+    _lbl = _fmt_ym_long(_ym)
+    if _lbl not in period_ranges:
+        period_options.append(_lbl)
+        period_ranges[_lbl] = (_ym, _ym)
+
+filt_c1, filt_c2 = st.columns([2, 1])
 with filt_c1:
-    sel_start = st.selectbox(
-        "From month",
-        options=available_months,
-        index=min(11, len(available_months) - 1),  # default ~12 months back
-        key="pay_start",
+    sel_period = st.selectbox(
+        "Period",
+        options=period_options,
+        index=0,  # default: This Month
+        key="pay_period",
     )
 with filt_c2:
-    sel_end = st.selectbox(
-        "To month",
-        options=available_months,
-        index=0,
-        key="pay_end",
-    )
-with filt_c3:
     include_stock = st.checkbox(
         "Include Stock Payments",
         value=False,
@@ -68,9 +98,7 @@ with filt_c3:
         key="pay_include_stock",
     )
 
-# Normalize order
-start_ym = min(sel_start, sel_end)
-end_ym = max(sel_start, sel_end)
+start_ym, end_ym = period_ranges[sel_period]
 
 # ---------------------------------------------------------------------------
 # KPIs
