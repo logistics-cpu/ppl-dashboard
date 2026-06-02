@@ -79,32 +79,37 @@ cat_summary = get_payment_summary_by_category(
     start_ym=start_ym, end_ym=end_ym, include_stock=include_stock,
 )
 
-total_outflow = sum(r["total"] for r in cat_summary if r["total"] > 0)
-total_inflow = sum(r["total"] for r in cat_summary if r["total"] < 0)
-net = total_outflow + total_inflow
+# Operational figures (excludes Stock Payments regardless of the toggle —
+# Stock Payments represent agency deposits, not operating spend)
+op_summary = get_payment_summary_by_category(
+    start_ym=start_ym, end_ym=end_ym, include_stock=False,
+)
+total_outflow = sum(r["total"] for r in op_summary if r["total"] > 0)
+total_inflow = sum(r["total"] for r in op_summary if r["total"] < 0)
+# Net = what the agency actually used = outflow - refunds
+net_spend = total_outflow + total_inflow  # total_inflow is already negative
+
 invoiced_categories = {
     cat for cat, meta in PAYMENT_CATEGORIES.items() if meta.get("has_invoice")
 }
 invoiced_amount = sum(
-    r["total"] for r in cat_summary
+    r["total"] for r in op_summary
     if r["category"] in invoiced_categories and r["total"] > 0
 )
 invoiced_pct = (invoiced_amount / total_outflow * 100) if total_outflow else 0
-
-# Stock payments (always show separately for reference)
-stock_summary_full = get_payment_summary_by_category(
-    start_ym=start_ym, end_ym=end_ym, include_stock=True,
-)
-stock_total = next(
-    (abs(r["total"]) for r in stock_summary_full if r["category"] == "Stock payments"),
-    0,
-)
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Total Outflow", f"${total_outflow:,.0f}")
 m2.metric("Invoiced %", f"{invoiced_pct:.0f}%", help="Share of outflow with formal invoices")
 m3.metric("Refunds / Negatives", f"${abs(total_inflow):,.0f}")
-m4.metric("Stock Payments", f"${stock_total:,.0f}", help="Monthly deposits to China agency")
+m4.metric(
+    "Stock Payments (Net)",
+    f"${net_spend:,.0f}",
+    help=(
+        "Net monthly cost to the China agency = Outflow − Refunds. "
+        "This is what the agency actually used to cover operations."
+    ),
+)
 
 if not include_stock:
     st.caption(
