@@ -802,6 +802,10 @@ with tab_payments:
                 category = (
                     str(category_raw).strip() if pd.notna(category_raw) else None
                 )
+                # Renames: legacy Excel name → dashboard name
+                _CATEGORY_RENAMES = {"Shipping costs": "Sea/Air Freight"}
+                if category in _CATEGORY_RENAMES:
+                    category = _CATEGORY_RENAMES[category]
                 has_inv = int(
                     PAYMENT_CATEGORIES.get(category, {}).get("has_invoice", False)
                 ) if category else 0

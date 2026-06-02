@@ -740,7 +740,7 @@ def clear_all_dropship_orders():
 PAYMENT_CATEGORIES = {
     "Stock payments":              {"has_invoice": False, "is_stock_payment": True},
     "Product costs":               {"has_invoice": False},
-    "Shipping costs":              {"has_invoice": False},
+    "Sea/Air Freight":             {"has_invoice": False},
     "4PX Invoice":                 {"has_invoice": True},
     "Dropshipping Invoice":        {"has_invoice": True},
     "Fedex Private Address Fee":   {"has_invoice": True},
