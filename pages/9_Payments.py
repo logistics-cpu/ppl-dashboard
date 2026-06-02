@@ -61,11 +61,13 @@ def _fmt_ym_long(ym):
 
 
 current_ym = date.today().strftime("%Y-%m")
+# Default = most recent month that actually has data
+default_ym = available_months[0]  # available_months is sorted newest-first
+default_label = _fmt_ym_long(default_ym)
 
-period_options = ["This Month", "Last 3 Months", "Last 6 Months",
+period_options = ["Last 3 Months", "Last 6 Months",
                   "Last 9 Months", "Last 12 Months"]
 period_ranges = {
-    "This Month":     (current_ym, current_ym),
     "Last 3 Months":  (_months_back(2),  current_ym),
     "Last 6 Months":  (_months_back(5),  current_ym),
     "Last 9 Months":  (_months_back(8),  current_ym),
@@ -84,7 +86,7 @@ with filt_c1:
     sel_period = st.selectbox(
         "Period",
         options=period_options,
-        index=0,  # default: This Month
+        index=period_options.index(default_label),  # default: newest data month
         key="pay_period",
     )
 with filt_c2:
