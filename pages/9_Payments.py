@@ -103,12 +103,9 @@ m1.metric("Total Outflow", f"${total_outflow:,.0f}")
 m2.metric("Invoiced %", f"{invoiced_pct:.0f}%", help="Share of outflow with formal invoices")
 m3.metric("Refunds / Negatives", f"${abs(total_inflow):,.0f}")
 m4.metric(
-    "Stock Payments (Net)",
+    "Net Spend",
     f"${net_spend:,.0f}",
-    help=(
-        "Net monthly cost to the China agency = Outflow − Refunds. "
-        "This is what the agency actually used to cover operations."
-    ),
+    help="Outflow − Refunds. The amount actually paid out for operations this period.",
 )
 
 if not include_stock:
