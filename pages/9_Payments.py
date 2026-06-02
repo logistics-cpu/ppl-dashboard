@@ -170,13 +170,15 @@ def _fmt_month(ym):
 if month_cat_rows:
     df_mc = pd.DataFrame(month_cat_rows)
     df_mc["category"] = df_mc["category"].fillna("(Uncategorized)")
-    df_mc["Month"] = df_mc["year_month"].apply(_fmt_month)
-    month_order = sorted(df_mc["year_month"].unique())
+    # Spend trend only — drop negative aggregates (refunds, deposits)
+    df_mc_spend = df_mc[df_mc["total"] > 0].copy()
+    df_mc_spend["Month"] = df_mc_spend["year_month"].apply(_fmt_month)
+    month_order = sorted(df_mc_spend["year_month"].unique())
     month_label_order = [_fmt_month(m) for m in month_order]
 
     fig_trend = px.bar(
-        df_mc, x="Month", y="total", color="category",
-        title="Monthly Spend by Category",
+        df_mc_spend, x="Month", y="total", color="category",
+        title="Monthly Spend by Category (positive spend only)",
         labels={"Month": "Month", "total": "Amount ($)", "category": "Category"},
         barmode="stack",
         category_orders={"Month": month_label_order},
@@ -197,14 +199,16 @@ month_ctry_rows = get_payment_summary_by_month_country(
 )
 if month_ctry_rows:
     df_mt = pd.DataFrame(month_ctry_rows)
-    df_mt["Month"] = df_mt["year_month"].apply(_fmt_month)
-    ctry_month_order = sorted(df_mt["year_month"].unique())
+    # Spend trend only — drop negative country aggregates
+    df_mt_spend = df_mt[df_mt["total"] > 0].copy()
+    df_mt_spend["Month"] = df_mt_spend["year_month"].apply(_fmt_month)
+    ctry_month_order = sorted(df_mt_spend["year_month"].unique())
     ctry_month_label_order = [_fmt_month(m) for m in ctry_month_order]
 
     fig_ctry = px.bar(
-        df_mt, x="Month", y="total", color="country",
+        df_mt_spend, x="Month", y="total", color="country",
         barmode="group",
-        title="Monthly Spend by Country",
+        title="Monthly Spend by Country (positive spend only)",
         labels={"Month": "Month", "total": "Amount ($)", "country": "Country"},
         category_orders={
             "Month": ctry_month_label_order,
