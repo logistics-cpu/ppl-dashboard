@@ -13,7 +13,6 @@ from core.database import (
     upsert_weekly_sales, get_last_sync,
     clear_all_sales, clear_all_inventory, clear_all_data,
     get_unmapped_raw_skus, derive_weekly_sales_from_raw,
-    get_orders_count, clear_all_orders,
 )
 from erp.parser import parse_erp_excel
 from core.auth import check_password
@@ -173,11 +172,10 @@ st.markdown("""
 # Tabs
 # ---------------------------------------------------------------------------
 (
-    tab_shopify, tab_orders, tab_dropship, tab_discovery, tab_erp,
+    tab_shopify, tab_dropship, tab_discovery, tab_erp,
     tab_arrivals, tab_transfers, tab_settings, tab_danger,
 ) = st.tabs([
     "Shopify Sync",
-    "Order Sync",
     "Dropship Upload",
     "SKU Discovery",
     "ERP Upload",
@@ -537,61 +535,6 @@ with tab_shopify:
 
         except Exception as e:
             st.error(f"Error reading CSV: {e}")
-
-# ─── Order Sync ───────────────────────────────────────────────────────────
-with tab_orders:
-    st.markdown("""
-    <div class="dm-section">
-        <div class="dm-section-title">Shopify Order Sync</div>
-        <div class="dm-section-desc">
-            Pull full order-level data from Shopify for analytics — shipping country/state,
-            line items, total value, channel, tags. This is separate from the weekly sales sync.
-            <br><br>
-            Customer PII is anonymized (only hashed customer IDs are stored — no emails,
-            names, phone numbers, or street addresses).
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    last_order_sync = get_last_sync("shopify_orders")
-    if last_order_sync:
-        st.success(
-            f"Last order sync: {last_order_sync['completed_at']} — "
-            f"{last_order_sync.get('records_synced', 0)} orders"
-        )
-    total_orders = get_orders_count()
-    st.caption(f"Total orders in database: **{total_orders}**")
-
-    from datetime import timedelta as _od_td
-    o_yesterday = date.today() - _od_td(days=1)
-    o_default_start = o_yesterday - _od_td(days=6)
-
-    ocol1, ocol2 = st.columns(2)
-    with ocol1:
-        o_start = st.date_input("From date", value=o_default_start, key="order_sync_start")
-    with ocol2:
-        o_end = st.date_input("To date", value=o_yesterday, key="order_sync_end")
-
-    if st.button("Sync Orders", type="primary", key="sync_orders_btn"):
-        from shopify_client.sync import sync_orders
-        try:
-            with st.spinner(f"Fetching orders from {o_start} to {o_end}..."):
-                orders_n, items_n = sync_orders(o_start.isoformat(), o_end.isoformat())
-            log_sync("shopify_orders", "success", orders_n)
-            st.success(f"Synced **{orders_n}** orders ({items_n} line items)")
-            st.rerun()
-        except Exception as e:
-            log_sync("shopify_orders", "error", 0, str(e))
-            st.error(f"Order sync failed: {e}")
-
-    st.markdown("---")
-    with st.expander("⚠️ Clear all order data"):
-        st.caption("Removes all orders + line items. Weekly sales data is NOT affected.")
-        if st.button("Clear orders", key="clear_orders_btn"):
-            clear_all_orders()
-            st.success("All order data cleared.")
-            st.rerun()
-
 
 # ─── Dropship Upload ──────────────────────────────────────────────────────
 with tab_dropship:
