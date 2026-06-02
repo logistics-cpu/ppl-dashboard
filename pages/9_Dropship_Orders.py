@@ -116,9 +116,22 @@ if available_months:
                 "Total": total,
             })
         sku_df = pd.DataFrame(sku_records).sort_values("Total", ascending=False).reset_index(drop=True)
-        total_units = sku_df["Total"].sum()
-        st.caption(f"**{sel_month}** · {len(sku_df)} SKUs · {total_units:,} total units")
-        st.dataframe(sku_df, use_container_width=True, hide_index=True)
+
+        # Append a 📊 Monthly Total row at the bottom (mirrors the Excel format)
+        totals_row = {
+            "SKU": "📊 Monthly Total",
+            "Shopify SKU": "",
+            "US": int(sku_df["US"].sum()),
+            "CA": int(sku_df["CA"].sum()),
+            "AU": int(sku_df["AU"].sum()),
+            "Total": int(sku_df["Total"].sum()),
+        }
+        sku_df_with_total = pd.concat(
+            [sku_df, pd.DataFrame([totals_row])], ignore_index=True,
+        )
+
+        st.caption(f"**{sel_month}** · {len(sku_df)} SKUs · {totals_row['Total']:,} total units")
+        st.dataframe(sku_df_with_total, use_container_width=True, hide_index=True)
     else:
         st.info(f"No China-shipped orders to US/CA/AU for {sel_month}.")
 else:
