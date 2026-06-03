@@ -321,7 +321,7 @@ if month_cat_rows:
         if "▲" in s:
             return "color: #DC2626; font-weight: 600;"  # red
         if "▼" in s:
-            return "color: #16A34A; font-weight: 600;"  # green
+            return "color: #2563EB; font-weight: 600;"  # blue
         return ""
 
     styled = comp_df.style.map(_color_delta)
