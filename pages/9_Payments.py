@@ -280,84 +280,82 @@ if month_cat_rows:
     cat_totals = {c: sum(pivot[c].values()) for c in cats_in_data}
     cats_sorted = sorted(cats_in_data, key=lambda x: -cat_totals[x])
 
-    # Plotly table doesn't render <span style='color:...'> inside cells —
-    # instead we color the whole cell via cells.font.color (2D array).
+    # To color ONLY the percentage portion, split each month into two
+    # adjacent columns: amount (always black) + Δ (colored).
     BLACK = "#0F172A"
     RED   = "#DC2626"
     BLUE  = "#2563EB"
 
-    def _fmt_value(v, prev_val):
-        """Return (text, color) — colored by delta direction."""
-        amount = f"${v:,.0f}"
+    def _delta(v, prev_val):
+        """Return (text, color) for the Δ column."""
         if prev_val is None or prev_val == 0 or v == 0:
-            return amount, BLACK
+            return "", BLACK
         d = (v - prev_val) / abs(prev_val) * 100
         if abs(d) >= 1000:
-            return amount, BLACK
+            return "", BLACK
         if d > 0:
-            return f"{amount} (▲ {d:+.0f}%)", RED
+            return f"▲ {d:+.0f}%", RED
         if d < 0:
-            return f"{amount} (▼ {d:+.0f}%)", BLUE
-        return f"{amount} (· 0%)", BLACK
+            return f"▼ {d:+.0f}%", BLUE
+        return "· 0%", BLACK
 
-    # Columns: Category + one per month
-    col_names = ["<b>Category</b>"] + [f"<b>{m}</b>" for m in months_sorted]
+    n_rows = len(cats_sorted) + 1  # + Σ Total
+    row_fill = ["#FFFFFF"] * (n_rows - 1) + ["#F1F5F9"]
 
-    # Build column data + parallel color arrays
-    category_col = list(cats_sorted) + ["Σ Total"]
-    category_color_col = [BLACK] * len(cats_sorted) + [BLACK]
+    # Build header labels + columns + colors
+    headers = ["<b>Category</b>"]
+    cols_text = [list(cats_sorted) + ["<b>Σ Total</b>"]]
+    cols_color = [[BLACK] * n_rows]
+    col_widths = [70]   # category column — narrow
 
-    month_cols = []          # one list per month column, each = list of cell text
-    month_color_cols = []    # parallel — same shape, holds per-cell color
-    for m in months_sorted:
-        prev_idx = months_sorted.index(m) - 1
-        prev_m = months_sorted[prev_idx] if prev_idx >= 0 else None
+    for i, m in enumerate(months_sorted):
+        prev_m = months_sorted[i - 1] if i > 0 else None
 
-        text_col, color_col = [], []
+        amount_col, amount_color = [], []
+        delta_col, delta_color = [], []
         for cat in cats_sorted:
             v = pivot[cat][m]
             pv = pivot[cat][prev_m] if prev_m else None
-            text, color = _fmt_value(v, pv)
-            text_col.append(text)
-            color_col.append(color)
-        # Totals row (always black + bold)
+            amount_col.append(f"${v:,.0f}")
+            amount_color.append(BLACK)
+            d_text, d_color = _delta(v, pv)
+            delta_col.append(d_text)
+            delta_color.append(d_color)
+        # Totals
         tot = sum(pivot[c][m] for c in cats_sorted)
         ptot = sum(pivot[c][prev_m] for c in cats_sorted) if prev_m else None
-        tot_text, _ = _fmt_value(tot, ptot)
-        text_col.append(f"<b>{tot_text}</b>")
-        color_col.append(BLACK)
+        amount_col.append(f"<b>${tot:,.0f}</b>")
+        amount_color.append(BLACK)
+        d_text, d_color = _delta(tot, ptot)
+        delta_col.append(f"<b>{d_text}</b>" if d_text else "")
+        delta_color.append(d_color)
 
-        month_cols.append(text_col)
-        month_color_cols.append(color_col)
-
-    # Highlight Σ Total row with a tinted background
-    n_rows = len(cats_sorted) + 1
-    row_fill = ["#FFFFFF"] * (n_rows - 1) + ["#F1F5F9"]
+        headers.extend([f"<b>{m}</b>", "<b>Δ%</b>"])
+        cols_text.extend([amount_col, delta_col])
+        cols_color.extend([amount_color, delta_color])
+        col_widths.extend([55, 40])  # amount narrower, delta narrowest
 
     fig_comp = go.Figure(data=[go.Table(
-        columnwidth=[260] + [170] * len(months_sorted),
+        columnwidth=col_widths,
         header=dict(
-            values=col_names,
+            values=headers,
             fill_color="#1E40AF",
-            font=dict(color="white", size=13),
+            font=dict(color="white", size=12),
             align="left",
-            height=36,
+            height=34,
         ),
         cells=dict(
-            values=[category_col] + month_cols,
-            fill_color=[row_fill] * (len(months_sorted) + 1),
-            font=dict(
-                color=[category_color_col] + month_color_cols,
-                size=12,
-            ),
-            align="left",
-            height=32,
+            values=cols_text,
+            fill_color=[row_fill] * len(cols_text),
+            font=dict(color=cols_color, size=12),
+            align=["left"] + (["right", "left"] * len(months_sorted)),
+            height=30,
         ),
     )])
     fig_comp.update_layout(
         title=f"Monthly Comparison (Category × Month) — {period_label}",
         margin=dict(t=60, b=10, l=10, r=10),
-        height=80 + 36 * n_rows,
+        height=80 + 34 * n_rows,
     )
     st.plotly_chart(fig_comp, use_container_width=True)
     st.caption(
