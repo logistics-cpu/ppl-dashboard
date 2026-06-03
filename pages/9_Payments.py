@@ -338,6 +338,73 @@ if month_cat_rows:
     )
     st.markdown(css + table_html, unsafe_allow_html=True)
 
+    # ── Downloadable versions ──
+    # 1) Plain CSV — same shape as the on-screen table but with text deltas.
+    def _fmt_cell_plain(v, prev_val):
+        amount = f"${v:,.0f}"
+        if prev_val is None or prev_val == 0 or v == 0:
+            return amount
+        d = (v - prev_val) / abs(prev_val) * 100
+        if abs(d) >= 1000:
+            return amount
+        arrow = "▲" if d > 0 else "▼" if d < 0 else "·"
+        return f"{amount} ({arrow} {d:+.0f}%)"
+
+    plain_records = []
+    for cat in cats_sorted:
+        row = {"Category": cat}
+        prev_val = None
+        for m in months_sorted:
+            v = pivot[cat][m]
+            row[m] = _fmt_cell_plain(v, prev_val)
+            prev_val = v
+        plain_records.append(row)
+    plain_totals = {"Category": "Σ Total"}
+    prev_val = None
+    for m in months_sorted:
+        v = sum(pivot[c][m] for c in cats_sorted)
+        plain_totals[m] = _fmt_cell_plain(v, prev_val)
+        prev_val = v
+    plain_records.append(plain_totals)
+    csv_str = pd.DataFrame(plain_records).to_csv(index=False).encode("utf-8")
+
+    # 2) Numeric wide-format — separate amount + delta% columns for analysis.
+    numeric_records = []
+    for cat in cats_sorted + ["Σ Total"]:
+        is_total = (cat == "Σ Total")
+        row = {"Category": cat}
+        prev_val = None
+        for m in months_sorted:
+            v = sum(pivot[c][m] for c in cats_sorted) if is_total else pivot[cat][m]
+            row[f"{m} Amount"] = round(v, 2)
+            if prev_val is None or prev_val == 0 or v == 0:
+                row[f"{m} Δ%"] = ""
+            else:
+                d = (v - prev_val) / abs(prev_val) * 100
+                row[f"{m} Δ%"] = round(d, 1) if abs(d) < 1000 else ""
+            prev_val = v
+        numeric_records.append(row)
+    numeric_csv = pd.DataFrame(numeric_records).to_csv(index=False).encode("utf-8")
+
+    file_period = period_label.replace(" ", "_").replace("–", "to")
+    dc1, dc2 = st.columns(2)
+    dc1.download_button(
+        "⬇️ Download (formatted CSV)",
+        data=csv_str,
+        file_name=f"payments_comparison_{file_period}.csv",
+        mime="text/csv",
+        help="Same shape as the table above, with text deltas like '$112,719 (▼ -47%)'.",
+        key="dl_comp_csv",
+    )
+    dc2.download_button(
+        "⬇️ Download (numeric CSV)",
+        data=numeric_csv,
+        file_name=f"payments_comparison_numeric_{file_period}.csv",
+        mime="text/csv",
+        help="Separate Amount + Δ% columns per month — best for further analysis.",
+        key="dl_comp_csv_num",
+    )
+
 st.markdown("---")
 
 # ---------------------------------------------------------------------------
