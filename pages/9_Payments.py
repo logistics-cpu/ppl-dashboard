@@ -153,29 +153,27 @@ if not include_stock:
 st.markdown("---")
 
 # ---------------------------------------------------------------------------
-# 🥧 Pie chart — Spend by Category
+# 🥧 Pie chart — Spend by Category (full-width for visual impact)
 # ---------------------------------------------------------------------------
-sc1, sc2 = st.columns([3, 2])
+st.markdown("### 🥧 Spend by Category")
+pos_cat = [r for r in cat_summary if r["total"] > 0]
+if pos_cat:
+    pie_df = pd.DataFrame([
+        {"Category": r["category"] or "(Uncategorized)", "Amount": r["total"]}
+        for r in pos_cat
+    ])
+    fig_pie = px.pie(
+        pie_df, names="Category", values="Amount", hole=0.45,
+        title=f"Spend by Category — {period_label}",
+    )
+    fig_pie.update_traces(textposition="inside", textinfo="percent+label")
+    fig_pie.update_layout(height=600, margin=dict(t=80, b=20, l=20, r=20))
+    st.plotly_chart(fig_pie, use_container_width=True)
+else:
+    st.info("No positive spend in the selected range.")
 
-with sc1:
-    st.markdown("### 🥧 Spend by Category")
-    pos_cat = [r for r in cat_summary if r["total"] > 0]
-    if pos_cat:
-        pie_df = pd.DataFrame([
-            {"Category": r["category"] or "(Uncategorized)", "Amount": r["total"]}
-            for r in pos_cat
-        ])
-        fig_pie = px.pie(
-            pie_df, names="Category", values="Amount", hole=0.45,
-            title=f"Spend by Category — {period_label}",
-        )
-        fig_pie.update_traces(textposition="inside", textinfo="percent+label")
-        st.plotly_chart(fig_pie, use_container_width=True)
-    else:
-        st.info("No positive spend in the selected range.")
-
-with sc2:
-    st.markdown("### 📊 Category Totals")
+# Category Totals table below the chart (was side-by-side, now stacked)
+with st.expander("📊 Category Totals (table)", expanded=True):
     cat_table = pd.DataFrame([
         {
             "Category": r["category"] or "(Uncategorized)",
