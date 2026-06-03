@@ -39,6 +39,14 @@ st.caption(
 
 # --- Monthly trend chart ---
 st.markdown("### 📈 Monthly Dropshipped Units")
+def _fmt_ym(ym):
+    """'2026-05' → 'May ‘26' for discrete category-axis labels."""
+    try:
+        return pd.to_datetime(ym + "-01").strftime("%b ‘%y")
+    except Exception:
+        return ym
+
+
 monthly_rows = get_dropship_monthly_breakdown()
 if monthly_rows:
     # Pivot to month × country
@@ -49,7 +57,7 @@ if monthly_rows:
 
     trend_records = []
     for m in months:
-        row = {"Month": m}
+        row = {"Month": _fmt_ym(m)}
         total = 0
         for ctry in DROPSHIP_TARGET_COUNTRIES:
             label = DROPSHIP_TARGET_COUNTRY_LABELS[ctry]
@@ -66,15 +74,20 @@ if monthly_rows:
         var_name="Country",
         value_name="Units",
     )
+    month_label_order = [_fmt_ym(m) for m in months]
     fig = px.bar(
         plot_df, x="Month", y="Units", color="Country",
         title="Monthly Dropshipped Units (China → US / CA / AU)",
         barmode="group",
         color_discrete_map={"US": "#1E40AF", "CA": "#DC2626", "AU": "#16A34A"},
-        category_orders={"Country": ["US", "CA", "AU"]},
+        category_orders={
+            "Country": ["US", "CA", "AU"],
+            "Month": month_label_order,
+        },
         text="Units",
     )
     fig.update_traces(textposition="outside")
+    fig.update_layout(xaxis_type="category")
     st.plotly_chart(fig, use_container_width=True)
 
     st.dataframe(trend_df, use_container_width=True, hide_index=True)
@@ -117,7 +130,7 @@ if vs_rows:
                 total = dropship + local
                 pct_dropship = (dropship / total * 100) if total else 0
                 records.append({
-                    "Month": m,
+                    "Month": _fmt_ym(m),
                     "Dropship (China)": dropship,
                     "Local": local,
                     "Total": total,
@@ -139,15 +152,20 @@ if vs_rows:
                 value_name="Units",
             )
             label = DROPSHIP_TARGET_COUNTRY_LABELS[country]
+            vs_month_order = [_fmt_ym(m) for m in months_seen]
             fig_vs = px.bar(
                 plot_df, x="Month", y="Units", color="Origin",
                 title=f"{label}: Dropshipped vs Local Shipping",
                 barmode="group",
                 color_discrete_map={"Dropship (China)": "#DC2626", "Local": "#1E40AF"},
-                category_orders={"Origin": ["Dropship (China)", "Local"]},
+                category_orders={
+                    "Origin": ["Dropship (China)", "Local"],
+                    "Month": vs_month_order,
+                },
                 text="Units",
             )
             fig_vs.update_traces(textposition="outside")
+            fig_vs.update_layout(xaxis_type="category")
             st.plotly_chart(fig_vs, use_container_width=True, key=f"vs_{label}")
 
             # Append a Total row at the bottom
