@@ -280,87 +280,62 @@ if month_cat_rows:
     cat_totals = {c: sum(pivot[c].values()) for c in cats_in_data}
     cats_sorted = sorted(cats_in_data, key=lambda x: -cat_totals[x])
 
-    # To color ONLY the percentage portion, split each month into two
-    # adjacent columns: amount (always black) + Δ (colored).
-    BLACK = "#0F172A"
-    RED   = "#DC2626"
-    BLUE  = "#2563EB"
-
-    def _delta(v, prev_val):
-        """Return (text, color) for the Δ column."""
+    # HTML table: only the % portion is colored via inline <span>.
+    # Plotly Table can't do this, so we render via st.markdown + custom CSS.
+    def _fmt_cell_html(v, prev_val):
+        amount = f"${v:,.0f}"
         if prev_val is None or prev_val == 0 or v == 0:
-            return "", BLACK
+            return amount
         d = (v - prev_val) / abs(prev_val) * 100
         if abs(d) >= 1000:
-            return "", BLACK
+            return amount
         if d > 0:
-            return f"▲ {d:+.0f}%", RED
-        if d < 0:
-            return f"▼ {d:+.0f}%", BLUE
-        return "· 0%", BLACK
+            color = "#DC2626"
+            arrow = "▲"
+        elif d < 0:
+            color = "#2563EB"
+            arrow = "▼"
+        else:
+            return f"{amount} (· 0%)"
+        return (
+            f"{amount} "
+            f"<span style='color:{color};font-weight:600;'>"
+            f"({arrow} {d:+.0f}%)</span>"
+        )
 
-    n_rows = len(cats_sorted) + 1  # + Σ Total
-    row_fill = ["#FFFFFF"] * (n_rows - 1) + ["#F1F5F9"]
-
-    # Build header labels + columns + colors
-    headers = ["<b>Category</b>"]
-    cols_text = [list(cats_sorted) + ["<b>Σ Total</b>"]]
-    cols_color = [[BLACK] * n_rows]
-    col_widths = [70]   # category column — narrow
-
-    for i, m in enumerate(months_sorted):
-        prev_m = months_sorted[i - 1] if i > 0 else None
-
-        amount_col, amount_color = [], []
-        delta_col, delta_color = [], []
-        for cat in cats_sorted:
+    comp_records = []
+    for cat in cats_sorted:
+        row = {"Category": cat}
+        prev_val = None
+        for m in months_sorted:
             v = pivot[cat][m]
-            pv = pivot[cat][prev_m] if prev_m else None
-            amount_col.append(f"${v:,.0f}")
-            amount_color.append(BLACK)
-            d_text, d_color = _delta(v, pv)
-            delta_col.append(d_text)
-            delta_color.append(d_color)
-        # Totals
-        tot = sum(pivot[c][m] for c in cats_sorted)
-        ptot = sum(pivot[c][prev_m] for c in cats_sorted) if prev_m else None
-        amount_col.append(f"<b>${tot:,.0f}</b>")
-        amount_color.append(BLACK)
-        d_text, d_color = _delta(tot, ptot)
-        delta_col.append(f"<b>{d_text}</b>" if d_text else "")
-        delta_color.append(d_color)
+            row[m] = _fmt_cell_html(v, prev_val)
+            prev_val = v
+        comp_records.append(row)
+    totals_row = {"Category": "<b>Σ Total</b>"}
+    prev_val = None
+    for m in months_sorted:
+        v = sum(pivot[c][m] for c in cats_sorted)
+        totals_row[m] = _fmt_cell_html(v, prev_val)
+        prev_val = v
+    comp_records.append(totals_row)
 
-        headers.extend([f"<b>{m}</b>", "<b>Δ%</b>"])
-        cols_text.extend([amount_col, delta_col])
-        cols_color.extend([amount_color, delta_color])
-        col_widths.extend([55, 40])  # amount narrower, delta narrowest
-
-    fig_comp = go.Figure(data=[go.Table(
-        columnwidth=col_widths,
-        header=dict(
-            values=headers,
-            fill_color="#1E40AF",
-            font=dict(color="white", size=12),
-            align="left",
-            height=34,
-        ),
-        cells=dict(
-            values=cols_text,
-            fill_color=[row_fill] * len(cols_text),
-            font=dict(color=cols_color, size=12),
-            align=["left"] + (["right", "left"] * len(months_sorted)),
-            height=30,
-        ),
-    )])
-    fig_comp.update_layout(
-        title=f"Monthly Comparison (Category × Month) — {period_label}",
-        margin=dict(t=60, b=10, l=10, r=10),
-        height=80 + 34 * n_rows,
+    comp_df = pd.DataFrame(comp_records)
+    table_html = comp_df.to_html(escape=False, index=False, classes="pay-comp")
+    css = (
+        "<style>"
+        "table.pay-comp{border-collapse:collapse;width:100%;font-size:0.9rem;}"
+        "table.pay-comp th,table.pay-comp td{border:1px solid #E2E8F0;padding:8px 12px;text-align:left;}"
+        "table.pay-comp th{background:#1E40AF;color:#FFFFFF;font-weight:600;}"
+        "table.pay-comp tr:last-child td{background:#F1F5F9;font-weight:600;}"
+        "table.pay-comp tr:hover td{background:#FAFAFA;}"
+        "table.pay-comp td:first-child{min-width:140px;}"
+        "</style>"
     )
-    st.plotly_chart(fig_comp, use_container_width=True)
+    st.markdown(css + table_html, unsafe_allow_html=True)
     st.caption(
-        "💡 Hover over the table → click the **camera icon 📷** in the top-right "
-        "to download as PNG."
+        "💡 No built-in download button for this table style — "
+        "use your OS screenshot tool (Mac: **⌘+Shift+4**, Windows: **Win+Shift+S**)."
     )
 
 st.markdown("---")
