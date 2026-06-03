@@ -563,6 +563,14 @@ with tab_dropship:
     )
     from core.sku_mapper import parse_shopify_sku, parse_erp_sku
 
+    # Show the most recent import status
+    _last = get_last_sync("dropship_upload")
+    if _last:
+        st.info(
+            f"📅 **Last import:** {_last['completed_at']} — "
+            f"{_last.get('records_synced', 0):,} rows"
+        )
+
     ds_file = st.file_uploader(
         "Upload Dropship Excel",
         type=["xlsx", "xls"],
@@ -686,12 +694,31 @@ with tab_dropship:
             )
 
             if st.button("Import Dropship Data", type="primary", key="import_dropship"):
-                with st.spinner(f"Importing {len(parsed_rows)} rows in bulk batches..."):
+                import time as _time
+                _t0 = _time.time()
+                with st.status(
+                    f"Importing {len(parsed_rows)} dropship rows…",
+                    expanded=True,
+                ) as _status:
+                    st.write(f"🗑️  Deleting existing rows in {min_date} → {max_date}…")
                     delete_dropship_in_range(min_date, max_date)
+                    st.write(f"📥 Inserting {len(parsed_rows)} new rows in bulk batches…")
                     n = insert_dropship_rows_bulk(parsed_rows, batch_size=200)
+                    _elapsed = _time.time() - _t0
+                    st.write(f"✅ Inserted {n} rows in {_elapsed:.1f}s")
+                    _status.update(
+                        label=f"✅ Import complete — {n} rows in {_elapsed:.1f}s",
+                        state="complete",
+                        expanded=False,
+                    )
                 log_sync("dropship_upload", "success", n)
-                st.success(f"Imported **{n}** dropship rows.")
-                st.rerun()
+                st.success(
+                    f"### ✅ Dropship import complete\n\n"
+                    f"**{n}** rows imported in **{_elapsed:.1f} seconds** · "
+                    f"covering **{min_date}** → **{max_date}**.\n\n"
+                    f"_You can now open the Dropship Orders page to see the data._"
+                )
+                st.balloons()
 
         except Exception as e:
             st.error(f"Error reading file: {e}")
@@ -722,6 +749,14 @@ with tab_payments:
         </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # Show the most recent import status
+    _last_pay = get_last_sync("payments_upload")
+    if _last_pay:
+        st.info(
+            f"📅 **Last import:** {_last_pay['completed_at']} — "
+            f"{_last_pay.get('records_synced', 0):,} rows"
+        )
 
     pay_file = st.file_uploader(
         "Upload Payments Excel",
@@ -884,12 +919,33 @@ with tab_payments:
             )
 
             if st.button("Import Payments", type="primary", key="import_payments"):
-                with st.spinner(f"Importing {len(parsed_rows)} rows..."):
+                import time as _time
+                _t0 = _time.time()
+                with st.status(
+                    f"Importing {len(parsed_rows)} payment rows…",
+                    expanded=True,
+                ) as _status:
+                    st.write(
+                        f"🗑️  Deleting existing rows from {months_seen[0]} → {months_seen[-1]}…"
+                    )
                     delete_payments_in_range(months_seen[0], months_seen[-1])
+                    st.write(f"📥 Inserting {len(parsed_rows)} new rows in bulk batches…")
                     n = insert_payment_rows_bulk(parsed_rows, batch_size=200)
+                    _elapsed = _time.time() - _t0
+                    st.write(f"✅ Inserted {n} rows in {_elapsed:.1f}s")
+                    _status.update(
+                        label=f"✅ Import complete — {n} rows in {_elapsed:.1f}s",
+                        state="complete",
+                        expanded=False,
+                    )
                 log_sync("payments_upload", "success", n)
-                st.success(f"Imported **{n}** payment rows.")
-                st.rerun()
+                st.success(
+                    f"### ✅ Payments import complete\n\n"
+                    f"**{n}** rows imported in **{_elapsed:.1f} seconds** · "
+                    f"covering **{months_seen[0]}** → **{months_seen[-1]}**.\n\n"
+                    f"_You can now open the Payments page to see the data._"
+                )
+                st.balloons()
 
         except Exception as e:
             st.error(f"Error reading file: {e}")
