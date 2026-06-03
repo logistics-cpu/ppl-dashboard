@@ -326,34 +326,19 @@ if month_cat_rows:
     comp_df = pd.DataFrame(comp_records)
 
     # Render as HTML so the per-cell colored spans show.
+    # IMPORTANT: leading whitespace in the markdown string would make the
+    # parser treat the HTML as a code block — so we build it un-indented.
     table_html = comp_df.to_html(escape=False, index=False, classes="pay-comp")
-    st.markdown(
-        """
-        <style>
-        table.pay-comp {
-            border-collapse: collapse;
-            width: 100%;
-            font-size: 0.9rem;
-        }
-        table.pay-comp th, table.pay-comp td {
-            border: 1px solid #E2E8F0;
-            padding: 8px 12px;
-            text-align: left;
-        }
-        table.pay-comp th {
-            background: #F1F5F9;
-            color: #1E293B;
-            font-weight: 600;
-        }
-        table.pay-comp tr:last-child td {
-            background: #F8FAFC;
-            font-weight: 600;
-        }
-        table.pay-comp tr:hover td { background: #FAFAFA; }
-        </style>
-        """ + table_html,
-        unsafe_allow_html=True,
+    css = (
+        "<style>"
+        "table.pay-comp{border-collapse:collapse;width:100%;font-size:0.9rem;}"
+        "table.pay-comp th,table.pay-comp td{border:1px solid #E2E8F0;padding:8px 12px;text-align:left;}"
+        "table.pay-comp th{background:#F1F5F9;color:#1E293B;font-weight:600;}"
+        "table.pay-comp tr:last-child td{background:#F8FAFC;font-weight:600;}"
+        "table.pay-comp tr:hover td{background:#FAFAFA;}"
+        "</style>"
     )
+    st.markdown(css + table_html, unsafe_allow_html=True)
 
 st.markdown("---")
 
