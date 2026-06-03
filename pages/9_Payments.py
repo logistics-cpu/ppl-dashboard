@@ -8,6 +8,7 @@ from collections import defaultdict
 from datetime import date
 
 import plotly.express as px
+import plotly.graph_objects as go
 
 from core.database import (
     init_db, get_payments, get_payment_summary_by_category,
@@ -279,130 +280,78 @@ if month_cat_rows:
     cat_totals = {c: sum(pivot[c].values()) for c in cats_in_data}
     cats_sorted = sorted(cats_in_data, key=lambda x: -cat_totals[x])
 
-    def _fmt_cell_html(v, prev_val):
-        """Cell as '$amount (▲/▼ ±%)' — only the delta is colored."""
-        amount = f"${v:,.0f}"
-        if prev_val is None or prev_val == 0 or v == 0:
-            return amount
-        d = (v - prev_val) / abs(prev_val) * 100
-        if abs(d) >= 1000:  # suppress noise from near-zero base
-            return amount
-        if d > 0:
-            color = "#DC2626"  # red
-            arrow = "▲"
-        elif d < 0:
-            color = "#2563EB"  # blue
-            arrow = "▼"
-        else:
-            return f"{amount} (· 0%)"
-        delta = (
-            f'<span style="color:{color};font-weight:600;">'
-            f'({arrow} {d:+.0f}%)</span>'
-        )
-        return f"{amount} {delta}"
-
-    # Build the comparison table
-    comp_records = []
-    for cat in cats_sorted:
-        row = {"Category": cat}
-        prev_val = None
-        for m in months_sorted:
-            v = pivot[cat][m]
-            row[m] = _fmt_cell_html(v, prev_val)
-            prev_val = v
-        comp_records.append(row)
-
-    # Totals row
-    totals_row = {"Category": "<b>Σ Total</b>"}
-    prev_val = None
-    for m in months_sorted:
-        v = sum(pivot[c][m] for c in cats_sorted)
-        totals_row[m] = _fmt_cell_html(v, prev_val)
-        prev_val = v
-    comp_records.append(totals_row)
-
-    comp_df = pd.DataFrame(comp_records)
-
-    # Render as HTML so the per-cell colored spans show.
-    # IMPORTANT: leading whitespace in the markdown string would make the
-    # parser treat the HTML as a code block — so we build it un-indented.
-    table_html = comp_df.to_html(escape=False, index=False, classes="pay-comp")
-    css = (
-        "<style>"
-        "table.pay-comp{border-collapse:collapse;width:100%;font-size:0.9rem;}"
-        "table.pay-comp th,table.pay-comp td{border:1px solid #E2E8F0;padding:8px 12px;text-align:left;}"
-        "table.pay-comp th{background:#F1F5F9;color:#1E293B;font-weight:600;}"
-        "table.pay-comp tr:last-child td{background:#F8FAFC;font-weight:600;}"
-        "table.pay-comp tr:hover td{background:#FAFAFA;}"
-        "</style>"
-    )
-    st.markdown(css + table_html, unsafe_allow_html=True)
-
-    # ── Downloadable versions ──
-    # 1) Plain CSV — same shape as the on-screen table but with text deltas.
-    def _fmt_cell_plain(v, prev_val):
+    # Build cell strings per column — Plotly table supports inline HTML
+    # so we can color just the delta portion.
+    def _fmt_cell(v, prev_val):
         amount = f"${v:,.0f}"
         if prev_val is None or prev_val == 0 or v == 0:
             return amount
         d = (v - prev_val) / abs(prev_val) * 100
         if abs(d) >= 1000:
             return amount
-        arrow = "▲" if d > 0 else "▼" if d < 0 else "·"
-        return f"{amount} ({arrow} {d:+.0f}%)"
+        if d > 0:
+            return (
+                f"{amount} "
+                f"<span style='color:#DC2626'><b>(▲ {d:+.0f}%)</b></span>"
+            )
+        elif d < 0:
+            return (
+                f"{amount} "
+                f"<span style='color:#2563EB'><b>(▼ {d:+.0f}%)</b></span>"
+            )
+        return f"{amount} (· 0%)"
 
-    plain_records = []
-    for cat in cats_sorted:
-        row = {"Category": cat}
-        prev_val = None
-        for m in months_sorted:
-            v = pivot[cat][m]
-            row[m] = _fmt_cell_plain(v, prev_val)
-            prev_val = v
-        plain_records.append(row)
-    plain_totals = {"Category": "Σ Total"}
-    prev_val = None
+    # Columns: Category + one per month
+    col_names = ["Category"] + [f"<b>{m}</b>" for m in months_sorted]
+
+    # Build column data (one list per column)
+    category_col = list(cats_sorted) + ["<b>Σ Total</b>"]
+    month_cols = []
     for m in months_sorted:
-        v = sum(pivot[c][m] for c in cats_sorted)
-        plain_totals[m] = _fmt_cell_plain(v, prev_val)
-        prev_val = v
-    plain_records.append(plain_totals)
-    csv_str = pd.DataFrame(plain_records).to_csv(index=False).encode("utf-8")
+        col_vals = []
+        # For each category row, compute formatted cell using prev month value
+        prev_idx = months_sorted.index(m) - 1
+        prev_m = months_sorted[prev_idx] if prev_idx >= 0 else None
+        for cat in cats_sorted:
+            v = pivot[cat][m]
+            pv = pivot[cat][prev_m] if prev_m else None
+            col_vals.append(_fmt_cell(v, pv))
+        # Totals
+        tot = sum(pivot[c][m] for c in cats_sorted)
+        ptot = sum(pivot[c][prev_m] for c in cats_sorted) if prev_m else None
+        col_vals.append(f"<b>{_fmt_cell(tot, ptot)}</b>")
+        month_cols.append(col_vals)
 
-    # 2) Numeric wide-format — separate amount + delta% columns for analysis.
-    numeric_records = []
-    for cat in cats_sorted + ["Σ Total"]:
-        is_total = (cat == "Σ Total")
-        row = {"Category": cat}
-        prev_val = None
-        for m in months_sorted:
-            v = sum(pivot[c][m] for c in cats_sorted) if is_total else pivot[cat][m]
-            row[f"{m} Amount"] = round(v, 2)
-            if prev_val is None or prev_val == 0 or v == 0:
-                row[f"{m} Δ%"] = ""
-            else:
-                d = (v - prev_val) / abs(prev_val) * 100
-                row[f"{m} Δ%"] = round(d, 1) if abs(d) < 1000 else ""
-            prev_val = v
-        numeric_records.append(row)
-    numeric_csv = pd.DataFrame(numeric_records).to_csv(index=False).encode("utf-8")
+    # Highlight the Σ Total row with a tinted background
+    n_rows = len(cats_sorted) + 1
+    row_fill = ["#FFFFFF"] * (n_rows - 1) + ["#F1F5F9"]
 
-    file_period = period_label.replace(" ", "_").replace("–", "to")
-    dc1, dc2 = st.columns(2)
-    dc1.download_button(
-        "⬇️ Download (formatted CSV)",
-        data=csv_str,
-        file_name=f"payments_comparison_{file_period}.csv",
-        mime="text/csv",
-        help="Same shape as the table above, with text deltas like '$112,719 (▼ -47%)'.",
-        key="dl_comp_csv",
+    fig_comp = go.Figure(data=[go.Table(
+        columnwidth=[280] + [180] * len(months_sorted),
+        header=dict(
+            values=col_names,
+            fill_color="#1E40AF",
+            font=dict(color="white", size=13),
+            align="left",
+            height=36,
+        ),
+        cells=dict(
+            values=[category_col] + month_cols,
+            fill_color=[row_fill] * (len(months_sorted) + 1),
+            font=dict(color="#0F172A", size=12),
+            align="left",
+            height=32,
+        ),
+    )])
+    fig_comp.update_layout(
+        title=f"Monthly Comparison (Category × Month) — {period_label}",
+        margin=dict(t=60, b=10, l=10, r=10),
+        height=80 + 36 * n_rows,
     )
-    dc2.download_button(
-        "⬇️ Download (numeric CSV)",
-        data=numeric_csv,
-        file_name=f"payments_comparison_numeric_{file_period}.csv",
-        mime="text/csv",
-        help="Separate Amount + Δ% columns per month — best for further analysis.",
-        key="dl_comp_csv_num",
+    st.plotly_chart(fig_comp, use_container_width=True)
+    st.caption(
+        "💡 Hover over the chart → click the **camera icon 📷** in the top-right "
+        "of the chart toolbar to download as PNG."
     )
 
 st.markdown("---")
