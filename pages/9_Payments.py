@@ -281,6 +281,17 @@ if month_cat_rows:
     cat_totals = {c: sum(pivot[c].values()) for c in cats_in_data}
     cats_sorted = sorted(cats_in_data, key=lambda x: -cat_totals[x])
 
+    def _fmt_cell(v, prev_val):
+        """Format a cell as '$amount (▲/▼ ±%)' — hides delta when prev is 0/None."""
+        if prev_val is None or prev_val == 0 or v == 0:
+            return f"${v:,.0f}"
+        d = (v - prev_val) / abs(prev_val) * 100
+        # Cap extreme deltas to keep the table readable
+        if abs(d) >= 1000:
+            return f"${v:,.0f}"
+        arrow = "▲" if d > 0 else "▼" if d < 0 else "·"
+        return f"${v:,.0f} ({arrow} {d:+.0f}%)"
+
     # Build the comparison table
     comp_records = []
     for cat in cats_sorted:
@@ -288,13 +299,7 @@ if month_cat_rows:
         prev_val = None
         for m in months_sorted:
             v = pivot[cat][m]
-            if prev_val is None or prev_val == 0:
-                delta = ""
-            else:
-                d = (v - prev_val) / abs(prev_val) * 100
-                arrow = "▲" if d > 0 else "▼" if d < 0 else "·"
-                delta = f" ({arrow} {d:+.0f}%)"
-            row[m] = f"${v:,.0f}{delta}"
+            row[m] = _fmt_cell(v, prev_val)
             prev_val = v
         comp_records.append(row)
 
@@ -303,18 +308,24 @@ if month_cat_rows:
     prev_val = None
     for m in months_sorted:
         v = sum(pivot[c][m] for c in cats_sorted)
-        if prev_val is None or prev_val == 0:
-            delta = ""
-        else:
-            d = (v - prev_val) / abs(prev_val) * 100
-            arrow = "▲" if d > 0 else "▼" if d < 0 else "·"
-            delta = f" ({arrow} {d:+.0f}%)"
-        totals_row[m] = f"${v:,.0f}{delta}"
+        totals_row[m] = _fmt_cell(v, prev_val)
         prev_val = v
     comp_records.append(totals_row)
 
     comp_df = pd.DataFrame(comp_records)
-    st.dataframe(comp_df, use_container_width=True, hide_index=True)
+
+    # Color the delta arrows: ▲ (increase) → red, ▼ (decrease) → green.
+    # Convention: lower spend = good (green), higher spend = bad (red).
+    def _color_delta(val):
+        s = str(val)
+        if "▲" in s:
+            return "color: #DC2626; font-weight: 600;"  # red
+        if "▼" in s:
+            return "color: #16A34A; font-weight: 600;"  # green
+        return ""
+
+    styled = comp_df.style.map(_color_delta)
+    st.dataframe(styled, use_container_width=True, hide_index=True)
 
 st.markdown("---")
 
