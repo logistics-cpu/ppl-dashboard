@@ -102,6 +102,12 @@ with filt_c2:
 
 start_ym, end_ym = period_ranges[sel_period]
 
+# Period label used in chart titles (so screenshots / downloads show the period)
+if start_ym == end_ym:
+    period_label = _fmt_ym_long(start_ym)
+else:
+    period_label = f"{_fmt_ym_long(start_ym)} – {_fmt_ym_long(end_ym)}"
+
 # ---------------------------------------------------------------------------
 # KPIs
 # ---------------------------------------------------------------------------
@@ -161,6 +167,7 @@ with sc1:
         ])
         fig_pie = px.pie(
             pie_df, names="Category", values="Amount", hole=0.45,
+            title=f"Spend by Category — {period_label}",
         )
         fig_pie.update_traces(textposition="inside", textinfo="percent+label")
         st.plotly_chart(fig_pie, use_container_width=True)
@@ -210,7 +217,7 @@ if month_cat_rows:
 
     fig_trend = px.bar(
         df_mc_spend, x="Month", y="total", color="category",
-        title="Monthly Spend by Category (positive spend only)",
+        title=f"Monthly Spend by Category (positive spend only) — {period_label}",
         labels={"Month": "Month", "total": "Amount ($)", "category": "Category"},
         barmode="stack",
         category_orders={"Month": month_label_order},
@@ -240,7 +247,7 @@ if month_ctry_rows:
     fig_ctry = px.bar(
         df_mt_spend, x="Month", y="total", color="country",
         barmode="group",
-        title="Monthly Spend by Country (positive spend only)",
+        title=f"Monthly Spend by Country (positive spend only) — {period_label}",
         labels={"Month": "Month", "total": "Amount ($)", "country": "Country"},
         category_orders={
             "Month": ctry_month_label_order,
