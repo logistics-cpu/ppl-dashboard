@@ -281,16 +281,27 @@ if month_cat_rows:
     cat_totals = {c: sum(pivot[c].values()) for c in cats_in_data}
     cats_sorted = sorted(cats_in_data, key=lambda x: -cat_totals[x])
 
-    def _fmt_cell(v, prev_val):
-        """Format a cell as '$amount (▲/▼ ±%)' — hides delta when prev is 0/None."""
+    def _fmt_cell_html(v, prev_val):
+        """Cell as '$amount (▲/▼ ±%)' — only the delta is colored."""
+        amount = f"${v:,.0f}"
         if prev_val is None or prev_val == 0 or v == 0:
-            return f"${v:,.0f}"
+            return amount
         d = (v - prev_val) / abs(prev_val) * 100
-        # Cap extreme deltas to keep the table readable
-        if abs(d) >= 1000:
-            return f"${v:,.0f}"
-        arrow = "▲" if d > 0 else "▼" if d < 0 else "·"
-        return f"${v:,.0f} ({arrow} {d:+.0f}%)"
+        if abs(d) >= 1000:  # suppress noise from near-zero base
+            return amount
+        if d > 0:
+            color = "#DC2626"  # red
+            arrow = "▲"
+        elif d < 0:
+            color = "#2563EB"  # blue
+            arrow = "▼"
+        else:
+            return f"{amount} (· 0%)"
+        delta = (
+            f'<span style="color:{color};font-weight:600;">'
+            f'({arrow} {d:+.0f}%)</span>'
+        )
+        return f"{amount} {delta}"
 
     # Build the comparison table
     comp_records = []
@@ -299,33 +310,50 @@ if month_cat_rows:
         prev_val = None
         for m in months_sorted:
             v = pivot[cat][m]
-            row[m] = _fmt_cell(v, prev_val)
+            row[m] = _fmt_cell_html(v, prev_val)
             prev_val = v
         comp_records.append(row)
 
     # Totals row
-    totals_row = {"Category": "Σ Total"}
+    totals_row = {"Category": "<b>Σ Total</b>"}
     prev_val = None
     for m in months_sorted:
         v = sum(pivot[c][m] for c in cats_sorted)
-        totals_row[m] = _fmt_cell(v, prev_val)
+        totals_row[m] = _fmt_cell_html(v, prev_val)
         prev_val = v
     comp_records.append(totals_row)
 
     comp_df = pd.DataFrame(comp_records)
 
-    # Color the delta arrows: ▲ (increase) → red, ▼ (decrease) → green.
-    # Convention: lower spend = good (green), higher spend = bad (red).
-    def _color_delta(val):
-        s = str(val)
-        if "▲" in s:
-            return "color: #DC2626; font-weight: 600;"  # red
-        if "▼" in s:
-            return "color: #2563EB; font-weight: 600;"  # blue
-        return ""
-
-    styled = comp_df.style.map(_color_delta)
-    st.dataframe(styled, use_container_width=True, hide_index=True)
+    # Render as HTML so the per-cell colored spans show.
+    table_html = comp_df.to_html(escape=False, index=False, classes="pay-comp")
+    st.markdown(
+        """
+        <style>
+        table.pay-comp {
+            border-collapse: collapse;
+            width: 100%;
+            font-size: 0.9rem;
+        }
+        table.pay-comp th, table.pay-comp td {
+            border: 1px solid #E2E8F0;
+            padding: 8px 12px;
+            text-align: left;
+        }
+        table.pay-comp th {
+            background: #F1F5F9;
+            color: #1E293B;
+            font-weight: 600;
+        }
+        table.pay-comp tr:last-child td {
+            background: #F8FAFC;
+            font-weight: 600;
+        }
+        table.pay-comp tr:hover td { background: #FAFAFA; }
+        </style>
+        """ + table_html,
+        unsafe_allow_html=True,
+    )
 
 st.markdown("---")
 
