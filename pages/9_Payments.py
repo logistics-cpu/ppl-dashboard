@@ -280,54 +280,62 @@ if month_cat_rows:
     cat_totals = {c: sum(pivot[c].values()) for c in cats_in_data}
     cats_sorted = sorted(cats_in_data, key=lambda x: -cat_totals[x])
 
-    # Build cell strings per column — Plotly table supports inline HTML
-    # so we can color just the delta portion.
-    def _fmt_cell(v, prev_val):
+    # Plotly table doesn't render <span style='color:...'> inside cells —
+    # instead we color the whole cell via cells.font.color (2D array).
+    BLACK = "#0F172A"
+    RED   = "#DC2626"
+    BLUE  = "#2563EB"
+
+    def _fmt_value(v, prev_val):
+        """Return (text, color) — colored by delta direction."""
         amount = f"${v:,.0f}"
         if prev_val is None or prev_val == 0 or v == 0:
-            return amount
+            return amount, BLACK
         d = (v - prev_val) / abs(prev_val) * 100
         if abs(d) >= 1000:
-            return amount
+            return amount, BLACK
         if d > 0:
-            return (
-                f"{amount} "
-                f"<span style='color:#DC2626'><b>(▲ {d:+.0f}%)</b></span>"
-            )
-        elif d < 0:
-            return (
-                f"{amount} "
-                f"<span style='color:#2563EB'><b>(▼ {d:+.0f}%)</b></span>"
-            )
-        return f"{amount} (· 0%)"
+            return f"{amount} (▲ {d:+.0f}%)", RED
+        if d < 0:
+            return f"{amount} (▼ {d:+.0f}%)", BLUE
+        return f"{amount} (· 0%)", BLACK
 
     # Columns: Category + one per month
-    col_names = ["Category"] + [f"<b>{m}</b>" for m in months_sorted]
+    col_names = ["<b>Category</b>"] + [f"<b>{m}</b>" for m in months_sorted]
 
-    # Build column data (one list per column)
-    category_col = list(cats_sorted) + ["<b>Σ Total</b>"]
-    month_cols = []
+    # Build column data + parallel color arrays
+    category_col = list(cats_sorted) + ["Σ Total"]
+    category_color_col = [BLACK] * len(cats_sorted) + [BLACK]
+
+    month_cols = []          # one list per month column, each = list of cell text
+    month_color_cols = []    # parallel — same shape, holds per-cell color
     for m in months_sorted:
-        col_vals = []
-        # For each category row, compute formatted cell using prev month value
         prev_idx = months_sorted.index(m) - 1
         prev_m = months_sorted[prev_idx] if prev_idx >= 0 else None
+
+        text_col, color_col = [], []
         for cat in cats_sorted:
             v = pivot[cat][m]
             pv = pivot[cat][prev_m] if prev_m else None
-            col_vals.append(_fmt_cell(v, pv))
-        # Totals
+            text, color = _fmt_value(v, pv)
+            text_col.append(text)
+            color_col.append(color)
+        # Totals row (always black + bold)
         tot = sum(pivot[c][m] for c in cats_sorted)
         ptot = sum(pivot[c][prev_m] for c in cats_sorted) if prev_m else None
-        col_vals.append(f"<b>{_fmt_cell(tot, ptot)}</b>")
-        month_cols.append(col_vals)
+        tot_text, _ = _fmt_value(tot, ptot)
+        text_col.append(f"<b>{tot_text}</b>")
+        color_col.append(BLACK)
 
-    # Highlight the Σ Total row with a tinted background
+        month_cols.append(text_col)
+        month_color_cols.append(color_col)
+
+    # Highlight Σ Total row with a tinted background
     n_rows = len(cats_sorted) + 1
     row_fill = ["#FFFFFF"] * (n_rows - 1) + ["#F1F5F9"]
 
     fig_comp = go.Figure(data=[go.Table(
-        columnwidth=[280] + [180] * len(months_sorted),
+        columnwidth=[260] + [170] * len(months_sorted),
         header=dict(
             values=col_names,
             fill_color="#1E40AF",
@@ -338,7 +346,10 @@ if month_cat_rows:
         cells=dict(
             values=[category_col] + month_cols,
             fill_color=[row_fill] * (len(months_sorted) + 1),
-            font=dict(color="#0F172A", size=12),
+            font=dict(
+                color=[category_color_col] + month_color_cols,
+                size=12,
+            ),
             align="left",
             height=32,
         ),
@@ -350,8 +361,8 @@ if month_cat_rows:
     )
     st.plotly_chart(fig_comp, use_container_width=True)
     st.caption(
-        "💡 Hover over the chart → click the **camera icon 📷** in the top-right "
-        "of the chart toolbar to download as PNG."
+        "💡 Hover over the table → click the **camera icon 📷** in the top-right "
+        "to download as PNG."
     )
 
 st.markdown("---")
