@@ -673,28 +673,21 @@ st.dataframe(region_table, use_container_width=True, hide_index=True)
 
 # --- Country drill-down (collapsed by default) ---
 with st.expander("📍 Browse by individual country", expanded=False):
-    region_filter = st.selectbox(
-        "Filter by region",
-        options=["All regions"] + [r for r in region_order if r in region_data],
-        index=0,
-        key="ds_country_region_filter",
-    )
-    ctry_rows = []
-    for c, d in sorted(ctry_data.items(), key=lambda x: -len(x[1]["orders"])):
-        if region_filter != "All regions" and d["region"] != region_filter:
-            continue
-        ctry_rows.append({
+    ctry_rows = [
+        {
             "Country": c,
             "Region": d["region"],
             "Orders": len(d["orders"]),
             "Orders %": f"{len(d['orders']) / tot_orders_region * 100:.1f}%",
             "Units": d["units"],
             "Units %": f"{d['units'] / tot_units_region * 100:.1f}%",
-        })
+        }
+        for c, d in sorted(ctry_data.items(), key=lambda x: -len(x[1]["orders"]))
+    ]
     st.dataframe(pd.DataFrame(ctry_rows), use_container_width=True, hide_index=True)
     st.caption(
-        f"Showing {len(ctry_rows)} countries"
-        + (f" in {region_filter}" if region_filter != "All regions" else "")
+        f"{len(ctry_rows)} countries total. "
+        "Click the **Region** column header to sort/group by region."
     )
 
 st.markdown("---")
