@@ -4,7 +4,7 @@ import streamlit as st
 
 # Set page config FIRST — must be the first Streamlit call.
 st.set_page_config(
-    page_title="PPL Sales Dashboard",
+    page_title="Logistics Dashboard",
     page_icon="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%231E40AF'/><text x='50' y='68' text-anchor='middle' font-size='50' fill='white'>P</text></svg>",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -26,8 +26,8 @@ inject_css()
 # Sidebar
 st.sidebar.markdown(f"""
 <div style="padding: 0.5rem 0;">
-    <h1 style="color:{PRIMARY};font-size:1.3rem;margin:0;">Sales Dashboard</h1>
-    <p style="color:{TEXT_MUTED};font-size:0.8rem;margin:2px 0 0 0;">PPL &amp; Nursing Pillow</p>
+    <h1 style="color:{PRIMARY};font-size:1.3rem;margin:0;">Logistics Dashboard</h1>
+    <p style="color:{TEXT_MUTED};font-size:0.8rem;margin:2px 0 0 0;">Sales · Dropship · Payments</p>
 </div>
 """, unsafe_allow_html=True)
 st.sidebar.divider()
@@ -47,7 +47,7 @@ else:
     st.sidebar.markdown(f'<span style="color:{TEXT_MUTED};font-size:0.85rem;">ERP: No upload</span>', unsafe_allow_html=True)
 
 # Main content
-page_header("Sales Dashboard", "Weekly sales tracking, inventory management, and stockout alerts")
+page_header("Logistics Dashboard", "Weekly sales · dropship tracking · payments · inventory")
 
 # Quick stats from real data
 inv_rows = get_latest_inventory()

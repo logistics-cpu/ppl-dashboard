@@ -32,7 +32,7 @@ def check_password():
         st.markdown("")
         st.markdown("")
         st.markdown(
-            '<h1 style="color:#1E40AF;text-align:center;font-size:1.8rem;margin-bottom:0;">PPL Dashboard</h1>',
+            '<h1 style="color:#1E40AF;text-align:center;font-size:1.8rem;margin-bottom:0;">Logistics Dashboard</h1>',
             unsafe_allow_html=True,
         )
         st.markdown(
