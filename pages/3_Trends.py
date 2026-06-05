@@ -44,7 +44,12 @@ for _, r in df_all.iterrows():
 for year, month in sorted(months_seen, reverse=True):
     period_options.append(datetime(year, month, 1).strftime("%B %Y"))
 
-sel_period = st.selectbox("Period", period_options, index=0, key="trend_period")
+sel_period = st.selectbox(
+    "Period",
+    period_options,
+    index=period_options.index("Last 4 Weeks") if "Last 4 Weeks" in period_options else 0,
+    key="trend_period",
+)
 
 
 def _current_week_start():
