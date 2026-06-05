@@ -10,6 +10,7 @@ from core.database import (
     init_db, get_dropship_orders, get_dropship_summary,
     get_dropship_monthly_breakdown, get_dropship_sku_breakdown_for_month,
     get_dropship_available_months, get_dropship_vs_local_monthly,
+    get_local_vs_dropship_by_sku, get_local_vs_dropship_summary,
     DROPSHIP_TARGET_COUNTRIES, DROPSHIP_TARGET_COUNTRY_LABELS,
     DROPSHIP_EXCLUDED_REGIONS,
 )
@@ -242,6 +243,159 @@ if available_months:
         st.info(f"No China-shipped orders to US/CA/AU for {sel_month}.")
 else:
     st.info("Upload dropship data first via Data Management → Dropship Upload.")
+
+st.markdown("---")
+
+# ---------------------------------------------------------------------------
+# 📦 Per-SKU Local vs Dropship breakdown
+# ---------------------------------------------------------------------------
+st.markdown("### 📦 Local vs Dropship by SKU")
+st.caption(
+    "**Local** = warehouse-home shipping to its home country (US warehouse → US "
+    "mainland, CA → CA, AU → AU). "
+    "**Dropship** = China origin to anywhere, OR any shipment to Hawaii / Alaska / "
+    "Puerto Rico, OR cross-region (e.g. US warehouse → UK). "
+    "Use this to spot SKUs that are over-relying on expensive dropship lanes."
+)
+
+# Month picker — use the broader 'available months from all dropship data'
+# (not the standard-rules version)
+from core.database import get_db as _gdb
+with _gdb() as _conn:
+    _all_months = [
+        r["ym"] for r in _conn.execute(
+            "SELECT DISTINCT substr(paid_at_local, 1, 7) AS ym "
+            "FROM dropship_orders WHERE paid_at_local IS NOT NULL "
+            "ORDER BY ym DESC"
+        ).fetchall() if r["ym"]
+    ]
+
+if not _all_months:
+    st.info("No dropship data yet — upload via Data Management → Dropship Upload.")
+else:
+    lvd_month = st.selectbox(
+        "Month",
+        options=_all_months,
+        index=0,  # newest first
+        key="lvd_month_picker",
+    )
+
+    # Summary KPIs
+    summary = get_local_vs_dropship_summary(lvd_month)
+    local_u = summary.get("local_units") or 0
+    drop_u = summary.get("dropship_units") or 0
+    total_u = summary.get("total_units") or 0
+    sku_n = summary.get("sku_count") or 0
+    overall_pct = (drop_u / total_u * 100) if total_u else 0
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("SKUs tracked", f"{sku_n:,}")
+    k2.metric("Local units", f"{local_u:,}")
+    k3.metric("Dropship units", f"{drop_u:,}")
+    k4.metric("Overall Dropship %", f"{overall_pct:.0f}%")
+
+    # Per-SKU table
+    sku_rows = get_local_vs_dropship_by_sku(lvd_month, limit=500)
+
+    if sku_rows:
+        # Build display rows with color flagging
+        def _drop_emoji(pct):
+            if pct >= 50:
+                return "🔴"
+            if pct >= 25:
+                return "🟡"
+            return "🟢"
+
+        display = []
+        for r in sku_rows:
+            display.append({
+                "": _drop_emoji(r["dropship_pct"]),
+                "SKU": r["erp_sku"],
+                "Shopify SKU": r["shopify_sku"] or "",
+                "Local": r["local_units"],
+                "Dropship": r["dropship_units"],
+                "Total": r["total_units"],
+                "Dropship %": round(r["dropship_pct"], 1),
+            })
+
+        display_df = pd.DataFrame(display)
+
+        st.markdown(
+            "🟢 < 25% (healthy) &nbsp; · &nbsp; 🟡 25–50% (watch) &nbsp; · &nbsp; "
+            "🔴 ≥ 50% (review — local stock issue?)"
+        )
+
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Dropship %": st.column_config.ProgressColumn(
+                    "Dropship %",
+                    min_value=0, max_value=100,
+                    format="%.0f%%",
+                ),
+                "Local": st.column_config.NumberColumn(format="%d"),
+                "Dropship": st.column_config.NumberColumn(format="%d"),
+                "Total": st.column_config.NumberColumn(format="%d"),
+            },
+            height=600,
+        )
+
+        # Top-N chart: SKUs ranked by Dropship %
+        top_n = st.slider(
+            "Top N SKUs by Dropship % (chart)",
+            min_value=5, max_value=30, value=15, step=5,
+            key="lvd_top_n",
+        )
+        # Filter: only SKUs with at least a few units of dropship to avoid
+        # cluttering the chart with low-volume oddities.
+        threshold = 10
+        chart_rows = [
+            r for r in sku_rows if r["dropship_units"] >= threshold
+        ]
+        chart_rows.sort(key=lambda x: -x["dropship_pct"])
+        chart_rows = chart_rows[:top_n]
+
+        if chart_rows:
+            chart_df = pd.DataFrame([
+                {
+                    "SKU": r["erp_sku"],
+                    "Local": r["local_units"],
+                    "Dropship": r["dropship_units"],
+                    "Dropship %": r["dropship_pct"],
+                }
+                for r in chart_rows
+            ])
+            stacked = chart_df.melt(
+                id_vars=["SKU", "Dropship %"],
+                value_vars=["Local", "Dropship"],
+                var_name="Origin",
+                value_name="Units",
+            )
+            fig_lvd = px.bar(
+                stacked,
+                x="Units", y="SKU", color="Origin",
+                orientation="h",
+                title=f"Top {len(chart_rows)} SKUs by Dropship % — {lvd_month}",
+                color_discrete_map={"Local": "#1E40AF", "Dropship": "#DC2626"},
+                category_orders={
+                    "Origin": ["Local", "Dropship"],
+                    "SKU": [r["erp_sku"] for r in chart_rows],
+                },
+            )
+            fig_lvd.update_layout(
+                height=max(380, 30 * len(chart_rows) + 100),
+                yaxis_autorange="reversed",
+            )
+            st.plotly_chart(fig_lvd, use_container_width=True)
+        else:
+            st.info(
+                f"No SKUs with ≥{threshold} dropship units in {lvd_month} — "
+                "nothing notable to chart."
+            )
+    else:
+        st.info(f"No data for {lvd_month}.")
 
 st.markdown("---")
 st.markdown("## 🔍 All Dropship Orders")

@@ -1031,6 +1031,86 @@ def get_dropship_vs_local_monthly(start_date=None, end_date=None):
     return [dict(r) for r in rows if r["origin_type"] in ("Dropship", "Local")]
 
 
+def get_local_vs_dropship_by_sku(year_month, limit=200):
+    """
+    Per-SKU local vs dropship breakdown for one month.
+
+    Classification rules:
+      LOCAL = warehouse's home market shipping to its home country, NOT to
+              US territories (HI/AK/PR are considered dropship destinations
+              because they're served separately from continental US warehouses).
+      DROPSHIP = everything else — China origin to anywhere, OR any warehouse
+              shipping to HI/AK/PR, OR cross-region (e.g. US warehouse → UK).
+
+    Returns rows: erp_sku, shopify_sku, local_units, dropship_units,
+                   total_units, dropship_pct
+    """
+    classification = """
+        CASE
+            WHEN warehouse IN ('US LA', 'US NJ', 'US East (China Post)', 'US West (China Post)')
+                 AND country = 'United States'
+                 AND (region IS NULL OR region NOT IN ('Hawaii', 'Alaska', 'Puerto Rico'))
+                THEN 'Local'
+            WHEN warehouse = 'Canada' AND country = 'Canada' THEN 'Local'
+            WHEN warehouse = 'Australia' AND country = 'Australia' THEN 'Local'
+            ELSE 'Dropship'
+        END
+    """
+    sql = f"""
+        SELECT
+            COALESCE(NULLIF(erp_sku, ''), '(no ERP SKU)') AS erp_sku,
+            MIN(shopify_sku) AS shopify_sku,
+            SUM(CASE WHEN {classification} = 'Local' THEN quantity ELSE 0 END) AS local_units,
+            SUM(CASE WHEN {classification} = 'Dropship' THEN quantity ELSE 0 END) AS dropship_units,
+            SUM(quantity) AS total_units
+        FROM dropship_orders
+        WHERE substr(paid_at_local, 1, 7) = ?
+        GROUP BY erp_sku
+        HAVING SUM(quantity) > 0
+        ORDER BY total_units DESC
+        LIMIT ?
+    """
+    with get_db() as conn:
+        rows = conn.execute(sql, (year_month, limit)).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        total = d["total_units"] or 0
+        d["dropship_pct"] = (d["dropship_units"] / total * 100) if total else 0
+        out.append(d)
+    return out
+
+
+def get_local_vs_dropship_summary(year_month):
+    """
+    Aggregate Local vs Dropship totals for one month (used for the KPI box).
+    Same classification rules as the per-SKU function.
+    """
+    classification = """
+        CASE
+            WHEN warehouse IN ('US LA', 'US NJ', 'US East (China Post)', 'US West (China Post)')
+                 AND country = 'United States'
+                 AND (region IS NULL OR region NOT IN ('Hawaii', 'Alaska', 'Puerto Rico'))
+                THEN 'Local'
+            WHEN warehouse = 'Canada' AND country = 'Canada' THEN 'Local'
+            WHEN warehouse = 'Australia' AND country = 'Australia' THEN 'Local'
+            ELSE 'Dropship'
+        END
+    """
+    sql = f"""
+        SELECT
+            SUM(CASE WHEN {classification} = 'Local' THEN quantity ELSE 0 END) AS local_units,
+            SUM(CASE WHEN {classification} = 'Dropship' THEN quantity ELSE 0 END) AS dropship_units,
+            SUM(quantity) AS total_units,
+            COUNT(DISTINCT erp_sku) AS sku_count
+        FROM dropship_orders
+        WHERE substr(paid_at_local, 1, 7) = ?
+    """
+    with get_db() as conn:
+        r = conn.execute(sql, (year_month,)).fetchone()
+    return dict(r) if r else {}
+
+
 def get_dropship_sku_breakdown_for_month(year_month):
     """
     Return SKU × country breakdown for a single month (YYYY-MM string).
