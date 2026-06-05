@@ -613,13 +613,40 @@ for r in all_filtered:
     ctry_data[c]["region"] = reg
     region_data[reg]["orders"].add(on); region_data[reg]["units"] += qty
 
-# --- Top row: By Warehouse | Regional Share donut ---
+# --- Mirrored layout: warehouse + region, each with donut on top, table below ---
+wh_total_orders = sum(len(d["orders"]) for d in wh_data.values()) or 1
+wh_total_units = sum(d["units"] for d in wh_data.values()) or 1
+tot_orders_region = sum(len(d["orders"]) for d in region_data.values()) or 1
+tot_units_region = sum(d["units"] for d in region_data.values()) or 1
+
+region_order = [
+    "🇺🇸 US", "🇬🇧 UK", "🇨🇦 CA", "🇦🇺 AU",
+    "🇪🇺 EU", "🌏 Asia", "🕌 Middle East",
+    "🌎 Latin America", "🌍 Africa", "🇳🇿 Oceania (other)",
+    "❓ Other",
+]
+
 sc1, sc2 = st.columns([1, 1])
 
 with sc1:
     st.markdown("### 🏭 By Warehouse")
-    wh_total_orders = sum(len(d["orders"]) for d in wh_data.values()) or 1
-    wh_total_units = sum(d["units"] for d in wh_data.values()) or 1
+    # Donut (Orders share)
+    wh_sorted = sorted(wh_data.items(), key=lambda x: -len(x[1]["orders"]))
+    wh_donut_df = pd.DataFrame([
+        {"Warehouse": w, "Orders": len(d["orders"])}
+        for w, d in wh_sorted if len(d["orders"]) > 0
+    ])
+    fig_wh = px.pie(
+        wh_donut_df, names="Warehouse", values="Orders", hole=0.5,
+        color_discrete_sequence=px.colors.qualitative.Pastel,
+    )
+    fig_wh.update_traces(textposition="inside", textinfo="percent+label")
+    fig_wh.update_layout(
+        height=380, margin=dict(t=20, b=20, l=20, r=20), showlegend=True,
+    )
+    st.plotly_chart(fig_wh, use_container_width=True)
+
+    # Table below
     wh_df = pd.DataFrame([
         {
             "Warehouse": w,
@@ -628,48 +655,40 @@ with sc1:
             "Units": d["units"],
             "Units %": f"{d['units'] / wh_total_units * 100:.1f}%",
         }
-        for w, d in sorted(wh_data.items(), key=lambda x: -len(x[1]["orders"]))
+        for w, d in wh_sorted
     ])
     st.dataframe(wh_df, use_container_width=True, hide_index=True)
 
 with sc2:
     st.markdown("### 🌍 Regional Share")
-    region_order = [
-        "🇺🇸 US", "🇬🇧 UK", "🇨🇦 CA", "🇦🇺 AU",
-        "🇪🇺 EU", "🌏 Asia", "🕌 Middle East",
-        "🌎 Latin America", "🌍 Africa", "🇳🇿 Oceania (other)",
-        "❓ Other",
-    ]
-    donut_df = pd.DataFrame([
-        {"Region": r, "Units": region_data[r]["units"]}
+    # Donut (Orders share)
+    region_donut_df = pd.DataFrame([
+        {"Region": r, "Orders": len(region_data[r]["orders"])}
         for r in region_order
-        if r in region_data and region_data[r]["units"] > 0
+        if r in region_data and len(region_data[r]["orders"]) > 0
     ])
     fig_region = px.pie(
-        donut_df, names="Region", values="Units", hole=0.5,
+        region_donut_df, names="Region", values="Orders", hole=0.5,
         color_discrete_sequence=px.colors.qualitative.Set2,
     )
     fig_region.update_traces(textposition="inside", textinfo="percent+label")
     fig_region.update_layout(
-        height=380, margin=dict(t=20, b=20, l=20, r=20),
-        showlegend=True,
+        height=380, margin=dict(t=20, b=20, l=20, r=20), showlegend=True,
     )
     st.plotly_chart(fig_region, use_container_width=True)
 
-# --- Below: Region detail table (full width) ---
-tot_orders_region = sum(len(d["orders"]) for d in region_data.values()) or 1
-tot_units_region = sum(d["units"] for d in region_data.values()) or 1
-region_table = pd.DataFrame([
-    {
-        "Region": r,
-        "Orders": len(region_data[r]["orders"]),
-        "Orders %": f"{len(region_data[r]['orders']) / tot_orders_region * 100:.1f}%",
-        "Units": region_data[r]["units"],
-        "Units %": f"{region_data[r]['units'] / tot_units_region * 100:.1f}%",
-    }
-    for r in region_order if r in region_data
-])
-st.dataframe(region_table, use_container_width=True, hide_index=True)
+    # Table below
+    region_table = pd.DataFrame([
+        {
+            "Region": r,
+            "Orders": len(region_data[r]["orders"]),
+            "Orders %": f"{len(region_data[r]['orders']) / tot_orders_region * 100:.1f}%",
+            "Units": region_data[r]["units"],
+            "Units %": f"{region_data[r]['units'] / tot_units_region * 100:.1f}%",
+        }
+        for r in region_order if r in region_data
+    ])
+    st.dataframe(region_table, use_container_width=True, hide_index=True)
 
 # --- Country drill-down (collapsed by default) ---
 with st.expander("📍 Browse by individual country", expanded=False):
