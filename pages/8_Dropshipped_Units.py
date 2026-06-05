@@ -273,15 +273,49 @@ with _gdb() as _conn:
 if not _all_months:
     st.info("No dropship data yet — upload via Data Management → Dropship Upload.")
 else:
-    lvd_month = st.selectbox(
-        "Month",
-        options=_all_months,
-        index=0,  # newest first
-        key="lvd_month_picker",
+    # Build a dropdown with rolling-window options + each individual month.
+    def _months_back_lvd(n):
+        """Return YYYY-MM that is n calendar months before today."""
+        today = date.today()
+        y, m = today.year, today.month - n
+        while m <= 0:
+            m += 12
+            y -= 1
+        return f"{y:04d}-{m:02d}"
+
+    def _fmt_ym(ym):
+        try:
+            return pd.to_datetime(ym + "-01").strftime("%B %Y")
+        except Exception:
+            return ym
+
+    current_ym = date.today().strftime("%Y-%m")
+
+    lvd_period_options = ["Last 3 Months", "Last 6 Months", "Last 12 Months"]
+    lvd_period_ranges = {
+        "Last 3 Months":  (_months_back_lvd(2),  current_ym),
+        "Last 6 Months":  (_months_back_lvd(5),  current_ym),
+        "Last 12 Months": (_months_back_lvd(11), current_ym),
+    }
+    # Append every individual month with data
+    for _ym in _all_months:
+        _lbl = _fmt_ym(_ym)
+        if _lbl not in lvd_period_ranges:
+            lvd_period_options.append(_lbl)
+            lvd_period_ranges[_lbl] = (_ym, _ym)
+
+    # Default to the newest month with data
+    default_lvd_label = _fmt_ym(_all_months[0])
+    lvd_period = st.selectbox(
+        "Period",
+        options=lvd_period_options,
+        index=lvd_period_options.index(default_lvd_label),
+        key="lvd_period_picker",
     )
+    lvd_start_ym, lvd_end_ym = lvd_period_ranges[lvd_period]
 
     # Summary KPIs
-    summary = get_local_vs_dropship_summary(lvd_month)
+    summary = get_local_vs_dropship_summary(lvd_start_ym, lvd_end_ym)
     local_u = summary.get("local_units") or 0
     drop_u = summary.get("dropship_units") or 0
     total_u = summary.get("total_units") or 0
@@ -295,7 +329,7 @@ else:
     k4.metric("Overall Dropship %", f"{overall_pct:.0f}%")
 
     # Per-SKU table
-    sku_rows = get_local_vs_dropship_by_sku(lvd_month, limit=500)
+    sku_rows = get_local_vs_dropship_by_sku(lvd_start_ym, lvd_end_ym, limit=500)
 
     if sku_rows:
         # Build display rows with color flagging
@@ -377,7 +411,7 @@ else:
                 stacked,
                 x="Units", y="SKU", color="Origin",
                 orientation="h",
-                title=f"Top {len(chart_rows)} SKUs by Dropship % — {lvd_month}",
+                title=f"Top {len(chart_rows)} SKUs by Dropship % — {lvd_period}",
                 color_discrete_map={"Local": "#1E40AF", "Dropship": "#DC2626"},
                 category_orders={
                     "Origin": ["Local", "Dropship"],
@@ -391,11 +425,11 @@ else:
             st.plotly_chart(fig_lvd, use_container_width=True)
         else:
             st.info(
-                f"No SKUs with ≥{threshold} dropship units in {lvd_month} — "
+                f"No SKUs with ≥{threshold} dropship units in {lvd_period} — "
                 "nothing notable to chart."
             )
     else:
-        st.info(f"No data for {lvd_month}.")
+        st.info(f"No data for {lvd_period}.")
 
 st.markdown("---")
 st.markdown("## 🔍 All Dropship Orders")
