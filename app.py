@@ -1,10 +1,8 @@
 """PPL Weekly Sales Tracking Dashboard — Main entry point."""
 
 import streamlit as st
-from core.database import init_db, get_last_sync, get_latest_inventory, get_weekly_sales
-from core.auth import check_password
-from core.theme import inject_css, page_header, PRIMARY, TEXT_MUTED, DANGER, WARNING, SUCCESS
 
+# Set page config FIRST — must be the first Streamlit call.
 st.set_page_config(
     page_title="PPL Sales Dashboard",
     page_icon="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%231E40AF'/><text x='50' y='68' text-anchor='middle' font-size='50' fill='white'>P</text></svg>",
@@ -12,8 +10,15 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# Auth check FIRST — defer all heavy imports until after the user is logged in
+# so the login page renders ~1-2 seconds faster on cold start.
+from core.auth import check_password
 if not check_password():
     st.stop()
+
+# Now safe to load the heavier stack
+from core.database import init_db, get_last_sync, get_latest_inventory, get_weekly_sales
+from core.theme import inject_css, page_header, PRIMARY, TEXT_MUTED, DANGER, WARNING, SUCCESS
 
 init_db()
 inject_css()
