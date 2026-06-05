@@ -560,63 +560,11 @@ st.markdown("---")
 # ---------------------------------------------------------------------------
 # Warehouse + Country summaries (use the FULL filtered set, not the limited table)
 # ---------------------------------------------------------------------------
-sc1, sc2 = st.columns(2)
-with sc1:
-    st.markdown("### By Warehouse")
-    wh_data = {}
-    for r in all_filtered:
-        w = r.get("warehouse") or "Unknown"
-        if w not in wh_data:
-            wh_data[w] = {"orders": set(), "units": 0}
-        wh_data[w]["orders"].add(r.get("order_number"))
-        wh_data[w]["units"] += r.get("quantity") or 0
-
-    wh_total_orders = sum(len(d["orders"]) for d in wh_data.values()) or 1
-    wh_total_units = sum(d["units"] for d in wh_data.values()) or 1
-    wh_df = pd.DataFrame([
-        {
-            "Warehouse": w,
-            "Orders": len(d["orders"]),
-            "Orders %": f"{len(d['orders']) / wh_total_orders * 100:.1f}%",
-            "Units": d["units"],
-            "Units %": f"{d['units'] / wh_total_units * 100:.1f}%",
-        }
-        for w, d in sorted(wh_data.items(), key=lambda x: -len(x[1]["orders"]))
-    ])
-    st.dataframe(wh_df, use_container_width=True, hide_index=True)
-
-with sc2:
-    st.markdown("### Top Destinations")
-    ctry_data = {}
-    for r in all_filtered:
-        c = r.get("country") or "Unknown"
-        if c not in ctry_data:
-            ctry_data[c] = {"orders": set(), "units": 0}
-        ctry_data[c]["orders"].add(r.get("order_number"))
-        ctry_data[c]["units"] += r.get("quantity") or 0
-
-    ctry_total_orders = sum(len(d["orders"]) for d in ctry_data.values()) or 1
-    ctry_total_units = sum(d["units"] for d in ctry_data.values()) or 1
-    ctry_df = pd.DataFrame([
-        {
-            "Country": c,
-            "Orders": len(d["orders"]),
-            "Orders %": f"{len(d['orders']) / ctry_total_orders * 100:.1f}%",
-            "Units": d["units"],
-            "Units %": f"{d['units'] / ctry_total_units * 100:.1f}%",
-        }
-        for c, d in sorted(ctry_data.items(), key=lambda x: -len(x[1]["orders"]))[:15]
-    ])
-    st.dataframe(ctry_df, use_container_width=True, hide_index=True)
-
 # ---------------------------------------------------------------------------
-# 🌍 Regional share donut (US / UK / CA / AU / EU / Asia / ME / Other)
-# ---------------------------------------------------------------------------
-st.markdown("### 🌍 Regional Share")
-
 # Region classification — UK kept separate from EU per ecommerce reporting
 # convention. Core markets (US/UK/CA/AU) each get their own slice; the long
 # tail is grouped into EU / Asia / Middle East / Latin America / Africa / Other.
+# ---------------------------------------------------------------------------
 EU_COUNTRIES = {
     "Netherlands", "Ireland", "Germany", "Portugal", "Albania", "Belgium",
     "Czechia", "France", "Italy", "Spain", "Austria", "Finland", "Greece",
@@ -637,75 +585,117 @@ OCEANIA_OTHER = {"New Zealand"}
 
 
 def _region_for(country):
-    if country in ("United States",):
-        return "🇺🇸 US"
-    if country in ("United Kingdom",):
-        return "🇬🇧 UK"
-    if country in ("Canada",):
-        return "🇨🇦 CA"
-    if country in ("Australia",):
-        return "🇦🇺 AU"
-    if country in EU_COUNTRIES:
-        return "🇪🇺 EU"
-    if country in ASIA_COUNTRIES:
-        return "🌏 Asia"
-    if country in MIDDLE_EAST_COUNTRIES:
-        return "🕌 Middle East"
-    if country in LATAM_COUNTRIES:
-        return "🌎 Latin America"
-    if country in AFRICA_COUNTRIES:
-        return "🌍 Africa"
-    if country in OCEANIA_OTHER:
-        return "🇳🇿 Oceania (other)"
+    if country == "United States": return "🇺🇸 US"
+    if country == "United Kingdom": return "🇬🇧 UK"
+    if country == "Canada": return "🇨🇦 CA"
+    if country == "Australia": return "🇦🇺 AU"
+    if country in EU_COUNTRIES: return "🇪🇺 EU"
+    if country in ASIA_COUNTRIES: return "🌏 Asia"
+    if country in MIDDLE_EAST_COUNTRIES: return "🕌 Middle East"
+    if country in LATAM_COUNTRIES: return "🌎 Latin America"
+    if country in AFRICA_COUNTRIES: return "🌍 Africa"
+    if country in OCEANIA_OTHER: return "🇳🇿 Oceania (other)"
     return "❓ Other"
 
 
+# Build all aggregates once
+wh_data = defaultdict(lambda: {"orders": set(), "units": 0})
+ctry_data = defaultdict(lambda: {"orders": set(), "units": 0, "region": None})
 region_data = defaultdict(lambda: {"orders": set(), "units": 0})
 for r in all_filtered:
+    w = r.get("warehouse") or "Unknown"
     c = r.get("country") or "Unknown"
-    region = _region_for(c)
-    region_data[region]["orders"].add(r.get("order_number"))
-    region_data[region]["units"] += r.get("quantity") or 0
+    reg = _region_for(c)
+    qty = r.get("quantity") or 0
+    on = r.get("order_number")
+    wh_data[w]["orders"].add(on);     wh_data[w]["units"] += qty
+    ctry_data[c]["orders"].add(on);   ctry_data[c]["units"] += qty
+    ctry_data[c]["region"] = reg
+    region_data[reg]["orders"].add(on); region_data[reg]["units"] += qty
 
-if region_data:
-    # Order regions so the donut renders core markets first
+# --- Top row: By Warehouse | Regional Share donut ---
+sc1, sc2 = st.columns([1, 1])
+
+with sc1:
+    st.markdown("### 🏭 By Warehouse")
+    wh_total_orders = sum(len(d["orders"]) for d in wh_data.values()) or 1
+    wh_total_units = sum(d["units"] for d in wh_data.values()) or 1
+    wh_df = pd.DataFrame([
+        {
+            "Warehouse": w,
+            "Orders": len(d["orders"]),
+            "Orders %": f"{len(d['orders']) / wh_total_orders * 100:.1f}%",
+            "Units": d["units"],
+            "Units %": f"{d['units'] / wh_total_units * 100:.1f}%",
+        }
+        for w, d in sorted(wh_data.items(), key=lambda x: -len(x[1]["orders"]))
+    ])
+    st.dataframe(wh_df, use_container_width=True, hide_index=True)
+
+with sc2:
+    st.markdown("### 🌍 Regional Share")
     region_order = [
         "🇺🇸 US", "🇬🇧 UK", "🇨🇦 CA", "🇦🇺 AU",
         "🇪🇺 EU", "🌏 Asia", "🕌 Middle East",
         "🌎 Latin America", "🌍 Africa", "🇳🇿 Oceania (other)",
         "❓ Other",
     ]
-    rcol1, rcol2 = st.columns([3, 2])
-    with rcol1:
-        donut_df = pd.DataFrame([
-            {
-                "Region": r,
-                "Units": region_data[r]["units"],
-            }
-            for r in region_order if r in region_data and region_data[r]["units"] > 0
-        ])
-        fig_region = px.pie(
-            donut_df, names="Region", values="Units", hole=0.45,
-            title="Units shipped by Region",
-            color_discrete_sequence=px.colors.qualitative.Set2,
-        )
-        fig_region.update_traces(textposition="inside", textinfo="percent+label")
-        fig_region.update_layout(height=480, margin=dict(t=60, b=20, l=20, r=20))
-        st.plotly_chart(fig_region, use_container_width=True)
-    with rcol2:
-        tot_orders_region = sum(len(d["orders"]) for d in region_data.values()) or 1
-        tot_units_region = sum(d["units"] for d in region_data.values()) or 1
-        region_table = pd.DataFrame([
-            {
-                "Region": r,
-                "Orders": len(region_data[r]["orders"]),
-                "Orders %": f"{len(region_data[r]['orders']) / tot_orders_region * 100:.1f}%",
-                "Units": region_data[r]["units"],
-                "Units %": f"{region_data[r]['units'] / tot_units_region * 100:.1f}%",
-            }
-            for r in region_order if r in region_data
-        ])
-        st.dataframe(region_table, use_container_width=True, hide_index=True)
+    donut_df = pd.DataFrame([
+        {"Region": r, "Units": region_data[r]["units"]}
+        for r in region_order
+        if r in region_data and region_data[r]["units"] > 0
+    ])
+    fig_region = px.pie(
+        donut_df, names="Region", values="Units", hole=0.5,
+        color_discrete_sequence=px.colors.qualitative.Set2,
+    )
+    fig_region.update_traces(textposition="inside", textinfo="percent+label")
+    fig_region.update_layout(
+        height=380, margin=dict(t=20, b=20, l=20, r=20),
+        showlegend=True,
+    )
+    st.plotly_chart(fig_region, use_container_width=True)
+
+# --- Below: Region detail table (full width) ---
+tot_orders_region = sum(len(d["orders"]) for d in region_data.values()) or 1
+tot_units_region = sum(d["units"] for d in region_data.values()) or 1
+region_table = pd.DataFrame([
+    {
+        "Region": r,
+        "Orders": len(region_data[r]["orders"]),
+        "Orders %": f"{len(region_data[r]['orders']) / tot_orders_region * 100:.1f}%",
+        "Units": region_data[r]["units"],
+        "Units %": f"{region_data[r]['units'] / tot_units_region * 100:.1f}%",
+    }
+    for r in region_order if r in region_data
+])
+st.dataframe(region_table, use_container_width=True, hide_index=True)
+
+# --- Country drill-down (collapsed by default) ---
+with st.expander("📍 Browse by individual country", expanded=False):
+    region_filter = st.selectbox(
+        "Filter by region",
+        options=["All regions"] + [r for r in region_order if r in region_data],
+        index=0,
+        key="ds_country_region_filter",
+    )
+    ctry_rows = []
+    for c, d in sorted(ctry_data.items(), key=lambda x: -len(x[1]["orders"])):
+        if region_filter != "All regions" and d["region"] != region_filter:
+            continue
+        ctry_rows.append({
+            "Country": c,
+            "Region": d["region"],
+            "Orders": len(d["orders"]),
+            "Orders %": f"{len(d['orders']) / tot_orders_region * 100:.1f}%",
+            "Units": d["units"],
+            "Units %": f"{d['units'] / tot_units_region * 100:.1f}%",
+        })
+    st.dataframe(pd.DataFrame(ctry_rows), use_container_width=True, hide_index=True)
+    st.caption(
+        f"Showing {len(ctry_rows)} countries"
+        + (f" in {region_filter}" if region_filter != "All regions" else "")
+    )
 
 st.markdown("---")
 
