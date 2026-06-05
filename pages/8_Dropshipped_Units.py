@@ -609,6 +609,104 @@ with sc2:
     ])
     st.dataframe(ctry_df, use_container_width=True, hide_index=True)
 
+# ---------------------------------------------------------------------------
+# 🌍 Regional share donut (US / UK / CA / AU / EU / Asia / ME / Other)
+# ---------------------------------------------------------------------------
+st.markdown("### 🌍 Regional Share")
+
+# Region classification — UK kept separate from EU per ecommerce reporting
+# convention. Core markets (US/UK/CA/AU) each get their own slice; the long
+# tail is grouped into EU / Asia / Middle East / Latin America / Africa / Other.
+EU_COUNTRIES = {
+    "Netherlands", "Ireland", "Germany", "Portugal", "Albania", "Belgium",
+    "Czechia", "France", "Italy", "Spain", "Austria", "Finland", "Greece",
+    "Switzerland", "Poland", "Malta", "Slovakia", "Luxembourg", "Sweden",
+    "Norway", "Denmark", "Hungary", "Romania", "Croatia", "Bulgaria",
+    "Serbia", "Ukraine",
+}
+ASIA_COUNTRIES = {
+    "Hong Kong", "Singapore", "Taiwan", "Japan", "South Korea", "Malaysia",
+    "Indonesia", "Thailand", "Vietnam", "Philippines", "India", "China",
+}
+MIDDLE_EAST_COUNTRIES = {
+    "Saudi Arabia", "United Arab Emirates", "Israel", "Turkey",
+}
+LATAM_COUNTRIES = {"Mexico", "Brazil", "Chile", "Argentina", "Colombia", "Peru"}
+AFRICA_COUNTRIES = {"South Africa", "Egypt", "Kenya", "Nigeria"}
+OCEANIA_OTHER = {"New Zealand"}
+
+
+def _region_for(country):
+    if country in ("United States",):
+        return "🇺🇸 US"
+    if country in ("United Kingdom",):
+        return "🇬🇧 UK"
+    if country in ("Canada",):
+        return "🇨🇦 CA"
+    if country in ("Australia",):
+        return "🇦🇺 AU"
+    if country in EU_COUNTRIES:
+        return "🇪🇺 EU"
+    if country in ASIA_COUNTRIES:
+        return "🌏 Asia"
+    if country in MIDDLE_EAST_COUNTRIES:
+        return "🕌 Middle East"
+    if country in LATAM_COUNTRIES:
+        return "🌎 Latin America"
+    if country in AFRICA_COUNTRIES:
+        return "🌍 Africa"
+    if country in OCEANIA_OTHER:
+        return "🇳🇿 Oceania (other)"
+    return "❓ Other"
+
+
+region_data = defaultdict(lambda: {"orders": set(), "units": 0})
+for r in all_filtered:
+    c = r.get("country") or "Unknown"
+    region = _region_for(c)
+    region_data[region]["orders"].add(r.get("order_number"))
+    region_data[region]["units"] += r.get("quantity") or 0
+
+if region_data:
+    # Order regions so the donut renders core markets first
+    region_order = [
+        "🇺🇸 US", "🇬🇧 UK", "🇨🇦 CA", "🇦🇺 AU",
+        "🇪🇺 EU", "🌏 Asia", "🕌 Middle East",
+        "🌎 Latin America", "🌍 Africa", "🇳🇿 Oceania (other)",
+        "❓ Other",
+    ]
+    rcol1, rcol2 = st.columns([3, 2])
+    with rcol1:
+        donut_df = pd.DataFrame([
+            {
+                "Region": r,
+                "Units": region_data[r]["units"],
+            }
+            for r in region_order if r in region_data and region_data[r]["units"] > 0
+        ])
+        fig_region = px.pie(
+            donut_df, names="Region", values="Units", hole=0.45,
+            title="Units shipped by Region",
+            color_discrete_sequence=px.colors.qualitative.Set2,
+        )
+        fig_region.update_traces(textposition="inside", textinfo="percent+label")
+        fig_region.update_layout(height=480, margin=dict(t=60, b=20, l=20, r=20))
+        st.plotly_chart(fig_region, use_container_width=True)
+    with rcol2:
+        tot_orders_region = sum(len(d["orders"]) for d in region_data.values()) or 1
+        tot_units_region = sum(d["units"] for d in region_data.values()) or 1
+        region_table = pd.DataFrame([
+            {
+                "Region": r,
+                "Orders": len(region_data[r]["orders"]),
+                "Orders %": f"{len(region_data[r]['orders']) / tot_orders_region * 100:.1f}%",
+                "Units": region_data[r]["units"],
+                "Units %": f"{region_data[r]['units'] / tot_units_region * 100:.1f}%",
+            }
+            for r in region_order if r in region_data
+        ])
+        st.dataframe(region_table, use_container_width=True, hide_index=True)
+
 st.markdown("---")
 
 # ---------------------------------------------------------------------------
