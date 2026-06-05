@@ -354,13 +354,52 @@ else:
 
         display_df = pd.DataFrame(display)
 
+        # SKU search + flag filter
+        ff1, ff2 = st.columns([3, 1])
+        with ff1:
+            sku_query = st.text_input(
+                "🔍 Search SKU (matches both ERP SKU and Shopify SKU)",
+                value="",
+                placeholder="e.g. blackBB-high7-S, J11268, pplegging-full",
+                key="lvd_sku_search",
+            )
+        with ff2:
+            flag_filter = st.selectbox(
+                "Show",
+                options=["All", "🟢 Healthy (<25%)", "🟡 Watch (25-50%)", "🔴 Review (≥50%)"],
+                index=0,
+                key="lvd_flag_filter",
+            )
+
+        # Apply filters
+        filtered_df = display_df.copy()
+        if sku_query.strip():
+            q = sku_query.strip().lower()
+            filtered_df = filtered_df[
+                filtered_df["SKU"].str.lower().str.contains(q, na=False)
+                | filtered_df["Shopify SKU"].str.lower().str.contains(q, na=False)
+            ]
+        if flag_filter.startswith("🟢"):
+            filtered_df = filtered_df[filtered_df["Dropship %"] < 25]
+        elif flag_filter.startswith("🟡"):
+            filtered_df = filtered_df[
+                (filtered_df["Dropship %"] >= 25) & (filtered_df["Dropship %"] < 50)
+            ]
+        elif flag_filter.startswith("🔴"):
+            filtered_df = filtered_df[filtered_df["Dropship %"] >= 50]
+
         st.markdown(
             "🟢 < 25% (healthy) &nbsp; · &nbsp; 🟡 25–50% (watch) &nbsp; · &nbsp; "
             "🔴 ≥ 50% (review — local stock issue?)"
         )
+        st.caption(
+            f"Showing **{len(filtered_df)}** of **{len(display_df)}** SKUs"
+            + (f" matching '{sku_query}'" if sku_query.strip() else "")
+            + (f" · filter: {flag_filter}" if flag_filter != "All" else "")
+        )
 
         st.dataframe(
-            display_df,
+            filtered_df,
             use_container_width=True,
             hide_index=True,
             column_config={
