@@ -570,8 +570,17 @@ with sc1:
             wh_data[w] = {"orders": set(), "units": 0}
         wh_data[w]["orders"].add(r.get("order_number"))
         wh_data[w]["units"] += r.get("quantity") or 0
+
+    wh_total_orders = sum(len(d["orders"]) for d in wh_data.values()) or 1
+    wh_total_units = sum(d["units"] for d in wh_data.values()) or 1
     wh_df = pd.DataFrame([
-        {"Warehouse": w, "Orders": len(d["orders"]), "Units": d["units"]}
+        {
+            "Warehouse": w,
+            "Orders": len(d["orders"]),
+            "Orders %": f"{len(d['orders']) / wh_total_orders * 100:.1f}%",
+            "Units": d["units"],
+            "Units %": f"{d['units'] / wh_total_units * 100:.1f}%",
+        }
         for w, d in sorted(wh_data.items(), key=lambda x: -len(x[1]["orders"]))
     ])
     st.dataframe(wh_df, use_container_width=True, hide_index=True)
@@ -585,8 +594,17 @@ with sc2:
             ctry_data[c] = {"orders": set(), "units": 0}
         ctry_data[c]["orders"].add(r.get("order_number"))
         ctry_data[c]["units"] += r.get("quantity") or 0
+
+    ctry_total_orders = sum(len(d["orders"]) for d in ctry_data.values()) or 1
+    ctry_total_units = sum(d["units"] for d in ctry_data.values()) or 1
     ctry_df = pd.DataFrame([
-        {"Country": c, "Orders": len(d["orders"]), "Units": d["units"]}
+        {
+            "Country": c,
+            "Orders": len(d["orders"]),
+            "Orders %": f"{len(d['orders']) / ctry_total_orders * 100:.1f}%",
+            "Units": d["units"],
+            "Units %": f"{d['units'] / ctry_total_units * 100:.1f}%",
+        }
         for c, d in sorted(ctry_data.items(), key=lambda x: -len(x[1]["orders"]))[:15]
     ])
     st.dataframe(ctry_df, use_container_width=True, hide_index=True)
