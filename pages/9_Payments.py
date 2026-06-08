@@ -62,6 +62,10 @@ def _fmt_ym_long(ym):
 
 
 current_ym = date.today().strftime("%Y-%m")
+# Rolling windows end at the LAST COMPLETED month — matches Shopify
+# and most ecommerce tools' convention. Current incomplete month is
+# still selectable as an individual entry.
+last_completed_ym = _months_back(1)
 # Default = most recent month that actually has data
 default_ym = available_months[0]  # available_months is sorted newest-first
 default_label = _fmt_ym_long(default_ym)
@@ -69,10 +73,10 @@ default_label = _fmt_ym_long(default_ym)
 period_options = ["Last 3 Months", "Last 6 Months",
                   "Last 9 Months", "Last 12 Months"]
 period_ranges = {
-    "Last 3 Months":  (_months_back(2),  current_ym),
-    "Last 6 Months":  (_months_back(5),  current_ym),
-    "Last 9 Months":  (_months_back(8),  current_ym),
-    "Last 12 Months": (_months_back(11), current_ym),
+    "Last 3 Months":  (_months_back(3),  last_completed_ym),
+    "Last 6 Months":  (_months_back(6),  last_completed_ym),
+    "Last 9 Months":  (_months_back(9),  last_completed_ym),
+    "Last 12 Months": (_months_back(12), last_completed_ym),
 }
 
 # Append every individual month that has data, formatted as 'May 2026'

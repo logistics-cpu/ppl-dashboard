@@ -334,13 +334,16 @@ else:
         except Exception:
             return ym
 
-    current_ym = date.today().strftime("%Y-%m")
+    # Last completed month = the month BEFORE today's month. This way
+    # "Last 3 Months" = 3 completed months ending last month, which
+    # matches how Shopify and most ecommerce tools report periods.
+    last_completed_ym = _months_back_lvd(1)
 
     lvd_period_options = ["Last 3 Months", "Last 6 Months", "Last 12 Months"]
     lvd_period_ranges = {
-        "Last 3 Months":  (_months_back_lvd(2),  current_ym),
-        "Last 6 Months":  (_months_back_lvd(5),  current_ym),
-        "Last 12 Months": (_months_back_lvd(11), current_ym),
+        "Last 3 Months":  (_months_back_lvd(3),  last_completed_ym),
+        "Last 6 Months":  (_months_back_lvd(6),  last_completed_ym),
+        "Last 12 Months": (_months_back_lvd(12), last_completed_ym),
     }
     # Append every individual month with data
     for _ym in _all_months:
