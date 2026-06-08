@@ -241,12 +241,31 @@ with tab_shopify:
 
     st.markdown("")  # spacer
     if st.button("Sync Now", type="primary", use_container_width=False):
+        import time as _time
+        _t0 = _time.time()
         try:
             from shopify_client.sync import sync_weekly_sales
-            with st.spinner("Syncing sales from Shopify..."):
+            with st.status(
+                f"Syncing Shopify sales {sync_start} → {sync_end}…",
+                expanded=True,
+            ) as _status:
+                st.write(f"📡 Fetching orders from Shopify API…")
                 count = sync_weekly_sales(sync_start.isoformat(), sync_end.isoformat())
-            st.success(f"Synced {count} weekly sales records from Shopify.")
+                _elapsed = _time.time() - _t0
+                st.write(f"✅ Synced {count} weekly sales records in {_elapsed:.1f}s")
+                _status.update(
+                    label=f"✅ Sync complete — {count} records in {_elapsed:.1f}s",
+                    state="complete",
+                    expanded=False,
+                )
             log_sync("shopify_sales", "success", count)
+            st.success(
+                f"### ✅ Shopify sync complete\n\n"
+                f"**{count}** weekly sales records synced in **{_elapsed:.1f} seconds** · "
+                f"covering **{sync_start}** → **{sync_end}**.\n\n"
+                f"_Open Weekly Sales or Trends to view the latest data._"
+            )
+            st.balloons()
         except ImportError:
             st.warning(
                 "Shopify client not configured yet. Add your API credentials to the `.env` file first."
@@ -405,17 +424,34 @@ with tab_shopify:
                 st.dataframe(preview_df.head(20), use_container_width=True, hide_index=True)
 
                 if st.button("Import Sales Data", type="primary", key="import_sales_xlsx"):
-                    count = 0
-                    for r in all_rows:
-                        upsert_weekly_sales(
-                            r["style"], r["color"], r["size"],
-                            r["week_start"], r["week_end"],
-                            r["units_sold"], source="spreadsheet",
+                    import time as _time
+                    _t0 = _time.time()
+                    with st.status(
+                        f"Importing {len(all_rows)} sales records…", expanded=True,
+                    ) as _status:
+                        st.write(f"📥 Writing rows to weekly_sales…")
+                        count = 0
+                        for r in all_rows:
+                            upsert_weekly_sales(
+                                r["style"], r["color"], r["size"],
+                                r["week_start"], r["week_end"],
+                                r["units_sold"], source="spreadsheet",
+                            )
+                            count += 1
+                        _elapsed = _time.time() - _t0
+                        st.write(f"✅ Imported {count} records in {_elapsed:.1f}s")
+                        _status.update(
+                            label=f"✅ Import complete — {count} records in {_elapsed:.1f}s",
+                            state="complete",
+                            expanded=False,
                         )
-                        count += 1
                     log_sync("spreadsheet_sales", "success", count)
-                    st.success(f"Imported **{count}** weekly sales records from spreadsheet.")
-                    st.rerun()
+                    st.success(
+                        f"### ✅ Spreadsheet sales import complete\n\n"
+                        f"**{count}** weekly sales records imported in "
+                        f"**{_elapsed:.1f} seconds**."
+                    )
+                    st.balloons()
             else:
                 st.warning("Could not find any sales data in the uploaded file. Make sure it has tabs named Long, 7/8, or Short with 'Week Date' and 'Units Sold' columns.")
 
@@ -520,15 +556,33 @@ with tab_shopify:
                             st.text(f"  {sku}: {qty} units")
 
                 if st.button("Import CSV Data", type="primary", key="import_shopify_csv"):
-                    count = 0
+                    import time as _time
+                    _t0 = _time.time()
                     ws = csv_week_start.isoformat()
                     we = csv_week_end.isoformat()
-                    for (style, color, size), units in agg.items():
-                        upsert_weekly_sales(style, color, size, ws, we, units, source="shopify")
-                        count += 1
+                    with st.status(
+                        f"Importing CSV for week {csv_week_start} → {csv_week_end}…",
+                        expanded=True,
+                    ) as _status:
+                        st.write(f"📥 Writing {len(agg)} SKU records…")
+                        count = 0
+                        for (style, color, size), units in agg.items():
+                            upsert_weekly_sales(style, color, size, ws, we, units, source="shopify")
+                            count += 1
+                        _elapsed = _time.time() - _t0
+                        st.write(f"✅ Imported {count} records in {_elapsed:.1f}s")
+                        _status.update(
+                            label=f"✅ Import complete — {count} records in {_elapsed:.1f}s",
+                            state="complete",
+                            expanded=False,
+                        )
                     log_sync("shopify_csv", "success", count)
-                    st.success(f"Imported **{count}** records for week {csv_week_start} to {csv_week_end}")
-                    st.rerun()
+                    st.success(
+                        f"### ✅ Shopify CSV import complete\n\n"
+                        f"**{count}** records imported in **{_elapsed:.1f} seconds** "
+                        f"for week **{csv_week_start}** → **{csv_week_end}**."
+                    )
+                    st.balloons()
             else:
                 st.warning("No recognized PPL or Nursing Pillow SKUs found in the CSV.")
                 if skipped_skus:
@@ -1021,15 +1075,42 @@ with tab_discovery:
         "Run this after a developer adds new SKU mappings to `core/config.py`. "
         "It re-processes the raw Shopify data and backfills `weekly_sales` for the newly mapped products."
     )
-    if st.button("🔄 Re-derive Weekly Sales", type="primary", key="rederive_sales"):
-        with st.spinner("Re-deriving weekly sales from raw data..."):
-            mapped, unmapped_count = derive_weekly_sales_from_raw()
-        st.success(
-            f"Done! Mapped **{mapped}** SKUs into `weekly_sales`. "
-            f"{unmapped_count} SKUs still unmapped (see list above)."
+    # Show last re-derive status at the top
+    _last_rederive = get_last_sync("rederive")
+    if _last_rederive:
+        st.info(
+            f"📅 **Last re-derive:** {_last_rederive['completed_at']} — "
+            f"{_last_rederive.get('records_synced', 0):,} SKUs mapped"
         )
+
+    if st.button("🔄 Re-derive Weekly Sales", type="primary", key="rederive_sales"):
+        import time as _time
+        _t0 = _time.time()
+        with st.status(
+            "Re-deriving weekly sales from raw data…", expanded=True,
+        ) as _status:
+            st.write("🔁 Reading raw Shopify sales…")
+            st.write("📥 Applying SKU mappings and writing to weekly_sales…")
+            mapped, unmapped_count = derive_weekly_sales_from_raw()
+            _elapsed = _time.time() - _t0
+            st.write(
+                f"✅ Mapped {mapped} SKUs · {unmapped_count} still unmapped · "
+                f"{_elapsed:.1f}s"
+            )
+            _status.update(
+                label=f"✅ Re-derive complete — {mapped} SKUs in {_elapsed:.1f}s",
+                state="complete",
+                expanded=False,
+            )
         log_sync("rederive", "success", mapped)
-        st.rerun()
+        st.success(
+            f"### ✅ Re-derive complete\n\n"
+            f"**{mapped}** SKUs mapped into `weekly_sales` in "
+            f"**{_elapsed:.1f} seconds**. "
+            f"{unmapped_count} SKUs still unmapped (see list above).\n\n"
+            f"_Refresh Weekly Sales / Trends to see the newly mapped products._"
+        )
+        st.balloons()
 
 # ─── ERP Upload ───────────────────────────────────────────────────────────
 with tab_erp:
@@ -1101,10 +1182,29 @@ with tab_erp:
 
             st.markdown("")  # spacer
             if st.button("Import to Database", type="primary", key="import_erp"):
-                insert_inventory_snapshot(result["records"])
-                log_sync("erp_upload", "success", len(result["records"]))
-                st.success(f"Imported **{len(result['records'])}** inventory records.")
-                st.rerun()
+                import time as _time
+                _t0 = _time.time()
+                n_records = len(result["records"])
+                with st.status(
+                    f"Importing {n_records} ERP records…", expanded=True,
+                ) as _status:
+                    st.write(f"📥 Writing {n_records} inventory rows to database…")
+                    insert_inventory_snapshot(result["records"])
+                    _elapsed = _time.time() - _t0
+                    st.write(f"✅ Imported {n_records} records in {_elapsed:.1f}s")
+                    _status.update(
+                        label=f"✅ Import complete — {n_records} records in {_elapsed:.1f}s",
+                        state="complete",
+                        expanded=False,
+                    )
+                log_sync("erp_upload", "success", n_records)
+                st.success(
+                    f"### ✅ ERP import complete\n\n"
+                    f"**{n_records}** inventory records imported in "
+                    f"**{_elapsed:.1f} seconds** for snapshot date **{snap_date}**.\n\n"
+                    f"_Open Inventory Snapshot to view the latest stock levels._"
+                )
+                st.balloons()
 
 # ─── Production Arrivals ──────────────────────────────────────────────────
 with tab_arrivals:
