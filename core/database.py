@@ -1049,10 +1049,11 @@ def get_local_vs_dropship_by_sku(start_ym, end_ym=None, limit=500):
     """
     Per-SKU local vs dropship breakdown for a YYYY-MM range.
 
-    Args:
-      start_ym: YYYY-MM (inclusive)
-      end_ym:   YYYY-MM (inclusive). Defaults to start_ym (single-month query).
-      limit:    max rows returned.
+    Grouped by ERP SKU only — the ERP SKU represents what was ACTUALLY
+    picked from the warehouse. The Shopify SKU in the ERP data often
+    points to an upsell variant that triggered the order rather than the
+    physical product, so we ignore it for counting purposes (just show
+    the dominant Shopify SKU for reference).
 
     Classification rules:
       LOCAL = warehouse-home shipping to its home country and NOT
@@ -1060,37 +1061,53 @@ def get_local_vs_dropship_by_sku(start_ym, end_ym=None, limit=500):
       DROPSHIP = everything else — China origin to anywhere, any warehouse
               to HI/AK/PR, or cross-region.
 
-    Returned at the (erp_sku × shopify_sku) grain so that the same physical
-    ERP SKU shipped under DIFFERENT Shopify SKUs gets separate rows. This
-    matches the user's mental model that 'J11268-fbp-turquoise' and
-    'J11268-combo-turquoise' are completely different products even if
-    they're fulfilled from the same warehouse pick.
-
-    Placeholder shopify_skus (nan / no platformsku / NULL / empty) are
-    consolidated into a single '(unmapped)' bucket per ERP SKU so they
-    don't fragment the table.
-
     Returns rows: erp_sku, shopify_sku, local_units, dropship_units,
                    total_units, dropship_pct
     """
     end_ym = end_ym or start_ym
     sql = f"""
+        WITH base AS (
+            SELECT
+                COALESCE(NULLIF(erp_sku, ''), '(no ERP SKU)') AS erp_sku,
+                shopify_sku,
+                {_LVD_CLASSIFICATION} AS origin,
+                quantity
+            FROM dropship_orders
+            WHERE substr(paid_at_local, 1, 7) BETWEEN ? AND ?
+        ),
+        dominant AS (
+            -- Pick the most-used Shopify SKU per ERP SKU just for the
+            -- display column. Push NULL / nan / 'no platformsku' to the
+            -- end so they don't win unless they're all we have.
+            SELECT erp_sku, shopify_sku
+            FROM (
+                SELECT erp_sku, shopify_sku,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY erp_sku
+                           ORDER BY
+                               CASE
+                                   WHEN shopify_sku IS NULL
+                                        OR shopify_sku = ''
+                                        OR LOWER(shopify_sku) IN ('nan', 'no platformsku')
+                                   THEN 1 ELSE 0
+                               END,
+                               SUM(quantity) DESC
+                       ) AS rn
+                FROM base
+                GROUP BY erp_sku, shopify_sku
+            )
+            WHERE rn = 1
+        )
         SELECT
-            COALESCE(NULLIF(erp_sku, ''), '(no ERP SKU)') AS erp_sku,
-            CASE
-                WHEN shopify_sku IS NULL
-                     OR shopify_sku = ''
-                     OR LOWER(shopify_sku) IN ('nan', 'no platformsku')
-                THEN '(unmapped)'
-                ELSE shopify_sku
-            END AS shopify_sku,
-            SUM(CASE WHEN {_LVD_CLASSIFICATION} = 'Local' THEN quantity ELSE 0 END) AS local_units,
-            SUM(CASE WHEN {_LVD_CLASSIFICATION} = 'Dropship' THEN quantity ELSE 0 END) AS dropship_units,
-            SUM(quantity) AS total_units
-        FROM dropship_orders
-        WHERE substr(paid_at_local, 1, 7) BETWEEN ? AND ?
-        GROUP BY erp_sku, shopify_sku
-        HAVING SUM(quantity) > 0
+            b.erp_sku,
+            d.shopify_sku,
+            SUM(CASE WHEN b.origin = 'Local' THEN b.quantity ELSE 0 END) AS local_units,
+            SUM(CASE WHEN b.origin = 'Dropship' THEN b.quantity ELSE 0 END) AS dropship_units,
+            SUM(b.quantity) AS total_units
+        FROM base b
+        LEFT JOIN dominant d ON d.erp_sku = b.erp_sku
+        GROUP BY b.erp_sku, d.shopify_sku
+        HAVING SUM(b.quantity) > 0
         ORDER BY total_units DESC
         LIMIT ?
     """

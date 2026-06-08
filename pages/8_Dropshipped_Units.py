@@ -299,8 +299,11 @@ st.caption(
     "**Dropship** = China origin to anywhere, OR any shipment to Hawaii / Alaska / "
     "Puerto Rico, OR cross-region (e.g. US warehouse → UK). "
     "Use this to spot SKUs that are over-relying on expensive dropship lanes. "
-    "_Old/new ERP variants (e.g. J11268-newyellow-Set + J23267-newyellow-Set) "
-    "are automatically merged — a `(+N)` badge shows the variant count._"
+    "_Rows are grouped by **ERP SKU** (the physical item shipped). "
+    "The Shopify SKU column is shown for reference only — it sometimes "
+    "points to an upsell variant in the ERP data. "
+    "Old/new ERP variants (J11268 ↔ J23267) auto-merge; a `(+N)` badge "
+    "shows the variant count._"
 )
 
 # Month picker — use the broader 'available months from all dropship data'
@@ -401,23 +404,27 @@ else:
                     return f"__variant__{suffix.lower()}"
             return sku
 
-        # Merge only when BOTH the canonical ERP key AND the Shopify SKU
-        # match. This keeps J11268-fbp-turquoise and J11268-combo-turquoise
-        # as separate rows even when both came from J11268-newblue-set,
-        # while still combining J11268+J23267 variants of the same Shopify
-        # product into a single row.
+        # Group by ERP SKU (canonical) only. The Shopify SKU column shows
+        # the dominant Shopify SKU just as a reference label — it's not
+        # used for counting because the ERP's 平台SKU often points to an
+        # upsell variant that doesn't reflect what was physically shipped.
         buckets = {}
         for r in sku_rows:
-            k = (_canonical_key(r["erp_sku"]), r["shopify_sku"])
+            k = _canonical_key(r["erp_sku"])
             if k not in buckets:
                 buckets[k] = {
                     "erp_skus": set(),
                     "shopify_sku": r["shopify_sku"],
+                    "best_shopify_units": r["total_units"],
                     "local_units": 0,
                     "dropship_units": 0,
                     "total_units": 0,
                 }
             buckets[k]["erp_skus"].add(r["erp_sku"])
+            # Pick the Shopify SKU coming from the highest-volume ERP variant
+            if r["total_units"] > buckets[k]["best_shopify_units"]:
+                buckets[k]["shopify_sku"] = r["shopify_sku"]
+                buckets[k]["best_shopify_units"] = r["total_units"]
             buckets[k]["local_units"] += r["local_units"]
             buckets[k]["dropship_units"] += r["dropship_units"]
             buckets[k]["total_units"] += r["total_units"]
