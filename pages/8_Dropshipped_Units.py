@@ -25,6 +25,49 @@ if not check_password():
 inject_css()
 init_db()
 
+# ---------------------------------------------------------------------------
+# Cached wrappers for Turso queries — Turso is in Tokyo so each round-trip
+# is ~150ms. Caching means switching periods / typing in search only
+# triggers DB calls when params actually change, not on every keystroke.
+# ttl=600 — 10 min — long enough to feel instant, short enough that a fresh
+# upload becomes visible without manual invalidation.
+# ---------------------------------------------------------------------------
+import streamlit as _st_cache  # alias to avoid shadowing
+@_st_cache.cache_data(ttl=600, show_spinner=False)
+def _c_monthly_breakdown():
+    return get_dropship_monthly_breakdown()
+
+@_st_cache.cache_data(ttl=600, show_spinner=False)
+def _c_vs_local_monthly():
+    return get_dropship_vs_local_monthly()
+
+@_st_cache.cache_data(ttl=600, show_spinner=False)
+def _c_available_months():
+    return get_dropship_available_months()
+
+@_st_cache.cache_data(ttl=600, show_spinner=False)
+def _c_sku_breakdown(month):
+    return get_dropship_sku_breakdown_for_month(month)
+
+@_st_cache.cache_data(ttl=600, show_spinner=False)
+def _c_local_vs_dropship_by_sku(start_ym, end_ym):
+    return get_local_vs_dropship_by_sku(start_ym, end_ym, limit=500)
+
+@_st_cache.cache_data(ttl=600, show_spinner=False)
+def _c_local_vs_dropship_summary(start_ym, end_ym):
+    return get_local_vs_dropship_summary(start_ym, end_ym)
+
+@_st_cache.cache_data(ttl=600, show_spinner=False)
+def _c_dropship_summary():
+    return get_dropship_summary()
+
+@_st_cache.cache_data(ttl=600, show_spinner=False)
+def _c_dropship_orders(start_date, end_date, warehouse, country, limit):
+    return get_dropship_orders(
+        start_date=start_date, end_date=end_date,
+        warehouse=warehouse, country=country, limit=limit,
+    )
+
 page_header(
     "Dropshipped Units",
     "China → US / CA / AU dropshipped units (excl. HI / AK / PR)",
@@ -48,7 +91,7 @@ def _fmt_ym(ym):
         return ym
 
 
-monthly_rows = get_dropship_monthly_breakdown()
+monthly_rows = _c_monthly_breakdown()
 if monthly_rows:
     # Pivot to month × country
     months = sorted({r["year_month"] for r in monthly_rows})
@@ -104,7 +147,7 @@ st.caption(
     "Hawaii / Alaska / Puerto Rico excluded from US."
 )
 
-vs_rows = get_dropship_vs_local_monthly()
+vs_rows = _c_vs_local_monthly()
 if vs_rows:
     months_seen = sorted({r["year_month"] for r in vs_rows})
 
@@ -192,7 +235,7 @@ st.markdown("---")
 
 # --- Per-month SKU breakdown ---
 st.markdown("### 📊 SKU Breakdown")
-available_months = get_dropship_available_months()
+available_months = _c_available_months()
 if available_months:
     sel_month = st.selectbox(
         "Month",
@@ -201,7 +244,7 @@ if available_months:
         key="ds_month_picker",
     )
 
-    sku_rows = get_dropship_sku_breakdown_for_month(sel_month)
+    sku_rows = _c_sku_breakdown(sel_month)
     if sku_rows:
         # Pivot to one row per SKU with US/CA/AU + Total columns
         sku_pivot = defaultdict(lambda: {"shopify_sku": "", "US": 0, "CA": 0, "AU": 0})
@@ -317,7 +360,7 @@ else:
     lvd_start_ym, lvd_end_ym = lvd_period_ranges[lvd_period]
 
     # Summary KPIs
-    summary = get_local_vs_dropship_summary(lvd_start_ym, lvd_end_ym)
+    summary = _c_local_vs_dropship_summary(lvd_start_ym, lvd_end_ym)
     local_u = summary.get("local_units") or 0
     drop_u = summary.get("dropship_units") or 0
     total_u = summary.get("total_units") or 0
@@ -331,7 +374,7 @@ else:
     k4.metric("Overall Dropship %", f"{overall_pct:.0f}%")
 
     # Per-SKU table
-    sku_rows = get_local_vs_dropship_by_sku(lvd_start_ym, lvd_end_ym, limit=500)
+    sku_rows = _c_local_vs_dropship_by_sku(lvd_start_ym, lvd_end_ym)
 
     if sku_rows:
         # Always merge old/new SKU variants — J<digits>-* SKUs with the same
@@ -535,7 +578,7 @@ st.caption("Generic filterable view of every dropship row (all warehouses, all d
 # ---------------------------------------------------------------------------
 # Filters (existing generic view)
 # ---------------------------------------------------------------------------
-all_summary = get_dropship_summary()
+all_summary = _c_dropship_summary()
 if all_summary["total_orders"] == 0:
     st.info(
         "No dropship data yet. Go to **Data Management → Dropship Upload** "
@@ -560,10 +603,8 @@ with fcol3:
     )
 
 # Load summary in range for filter options + KPIs
-in_range = get_dropship_orders(
-    start_date=f_start.isoformat(),
-    end_date=f_end.isoformat(),
-    limit=20000,
+in_range = _c_dropship_orders(
+    f_start.isoformat(), f_end.isoformat(), None, None, 20000,
 )
 warehouse_options = ["All warehouses"] + sorted({
     r["warehouse"] for r in in_range if r.get("warehouse")
@@ -583,12 +624,9 @@ ctry_filter = None if sel_country == "All countries" else sel_country
 
 # Fetch ALL rows matching filters for KPI / summary calculation (no row limit).
 # A separate, limited query is used only for the detail table below.
-all_filtered = get_dropship_orders(
-    start_date=f_start.isoformat(),
-    end_date=f_end.isoformat(),
-    warehouse=wh_filter,
-    country=ctry_filter,
-    limit=100000,
+all_filtered = _c_dropship_orders(
+    f_start.isoformat(), f_end.isoformat(),
+    wh_filter, ctry_filter, 100000,
 )
 
 # ---------------------------------------------------------------------------
