@@ -401,27 +401,23 @@ else:
                     return f"__variant__{suffix.lower()}"
             return sku
 
-        # Always merge old/new SKU variants. J<digits>- SKUs with the same
-        # suffix are treated as the same product. PPL SKUs (108731-...) are
-        # not affected.
+        # Merge only when BOTH the canonical ERP key AND the Shopify SKU
+        # match. This keeps J11268-fbp-turquoise and J11268-combo-turquoise
+        # as separate rows even when both came from J11268-newblue-set,
+        # while still combining J11268+J23267 variants of the same Shopify
+        # product into a single row.
         buckets = {}
         for r in sku_rows:
-            k = _canonical_key(r["erp_sku"])
+            k = (_canonical_key(r["erp_sku"]), r["shopify_sku"])
             if k not in buckets:
                 buckets[k] = {
-                    "erp_skus": [],
+                    "erp_skus": set(),
                     "shopify_sku": r["shopify_sku"],
                     "local_units": 0,
                     "dropship_units": 0,
                     "total_units": 0,
                 }
-            buckets[k]["erp_skus"].append(r["erp_sku"])
-            # Prefer the longest available Shopify SKU as the canonical
-            if r["shopify_sku"] and (
-                not buckets[k]["shopify_sku"]
-                or len(r["shopify_sku"]) > len(buckets[k]["shopify_sku"])
-            ):
-                buckets[k]["shopify_sku"] = r["shopify_sku"]
+            buckets[k]["erp_skus"].add(r["erp_sku"])
             buckets[k]["local_units"] += r["local_units"]
             buckets[k]["dropship_units"] += r["dropship_units"]
             buckets[k]["total_units"] += r["total_units"]
@@ -430,11 +426,11 @@ else:
         for k, b in buckets.items():
             total = b["total_units"]
             pct = (b["dropship_units"] / total * 100) if total else 0
-            if len(b["erp_skus"]) > 1:
-                primary = sorted(b["erp_skus"])[0]
-                erp_display = f"{primary} (+{len(b['erp_skus']) - 1})"
+            erp_skus_sorted = sorted(b["erp_skus"])
+            if len(erp_skus_sorted) > 1:
+                erp_display = f"{erp_skus_sorted[0]} (+{len(erp_skus_sorted) - 1})"
             else:
-                erp_display = b["erp_skus"][0]
+                erp_display = erp_skus_sorted[0]
             sku_rows_view.append({
                 "erp_sku": erp_display,
                 "shopify_sku": b["shopify_sku"],
