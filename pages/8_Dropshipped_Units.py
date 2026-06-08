@@ -255,7 +255,9 @@ st.caption(
     "mainland, CA → CA, AU → AU). "
     "**Dropship** = China origin to anywhere, OR any shipment to Hawaii / Alaska / "
     "Puerto Rico, OR cross-region (e.g. US warehouse → UK). "
-    "Use this to spot SKUs that are over-relying on expensive dropship lanes."
+    "Use this to spot SKUs that are over-relying on expensive dropship lanes. "
+    "_Old/new ERP variants (e.g. J11268-newyellow-Set + J23267-newyellow-Set) "
+    "are automatically merged — a `(+N)` badge shows the variant count._"
 )
 
 # Month picker — use the broader 'available months from all dropship data'
@@ -344,63 +346,49 @@ else:
             m = _re.match(r"^J\d+-(.+)$", sku or "")
             return m.group(1).lower() if m else sku
 
-        merge_variants = st.checkbox(
-            "🔀 Merge old/new SKU variants "
-            "(e.g. J11268-newyellow-Set + J23267-newyellow-Set → same product)",
-            value=True,
-            key="lvd_merge_variants",
-            help=(
-                "When enabled, J<digits>-* SKUs with the same suffix are "
-                "summed together. PPL SKUs (108731-...) are not affected. "
-                "Uncheck to see each variant separately."
-            ),
-        )
+        # Always merge old/new SKU variants. J<digits>- SKUs with the same
+        # suffix are treated as the same product. PPL SKUs (108731-...) are
+        # not affected.
+        buckets = {}
+        for r in sku_rows:
+            k = _canonical_key(r["erp_sku"])
+            if k not in buckets:
+                buckets[k] = {
+                    "erp_skus": [],
+                    "shopify_sku": r["shopify_sku"],
+                    "local_units": 0,
+                    "dropship_units": 0,
+                    "total_units": 0,
+                }
+            buckets[k]["erp_skus"].append(r["erp_sku"])
+            # Prefer the longest available Shopify SKU as the canonical
+            if r["shopify_sku"] and (
+                not buckets[k]["shopify_sku"]
+                or len(r["shopify_sku"]) > len(buckets[k]["shopify_sku"])
+            ):
+                buckets[k]["shopify_sku"] = r["shopify_sku"]
+            buckets[k]["local_units"] += r["local_units"]
+            buckets[k]["dropship_units"] += r["dropship_units"]
+            buckets[k]["total_units"] += r["total_units"]
 
-        sku_rows_view = sku_rows
-        if merge_variants:
-            buckets = {}
-            for r in sku_rows:
-                k = _canonical_key(r["erp_sku"])
-                if k not in buckets:
-                    buckets[k] = {
-                        "erp_skus": [],
-                        "shopify_sku": r["shopify_sku"],
-                        "local_units": 0,
-                        "dropship_units": 0,
-                        "total_units": 0,
-                    }
-                buckets[k]["erp_skus"].append(r["erp_sku"])
-                # Prefer the longest available Shopify SKU as the canonical
-                if r["shopify_sku"] and (
-                    not buckets[k]["shopify_sku"]
-                    or len(r["shopify_sku"]) > len(buckets[k]["shopify_sku"])
-                ):
-                    buckets[k]["shopify_sku"] = r["shopify_sku"]
-                buckets[k]["local_units"] += r["local_units"]
-                buckets[k]["dropship_units"] += r["dropship_units"]
-                buckets[k]["total_units"] += r["total_units"]
-
-            sku_rows_view = []
-            for k, b in buckets.items():
-                total = b["total_units"]
-                pct = (b["dropship_units"] / total * 100) if total else 0
-                # If only one variant, keep original SKU; if multiple, show
-                # the primary + suffix indicator.
-                if len(b["erp_skus"]) > 1:
-                    primary = max(b["erp_skus"], key=lambda s: 0)  # alphabetical
-                    primary = sorted(b["erp_skus"])[0]
-                    erp_display = f"{primary} (+{len(b['erp_skus']) - 1})"
-                else:
-                    erp_display = b["erp_skus"][0]
-                sku_rows_view.append({
-                    "erp_sku": erp_display,
-                    "shopify_sku": b["shopify_sku"],
-                    "local_units": b["local_units"],
-                    "dropship_units": b["dropship_units"],
-                    "total_units": total,
-                    "dropship_pct": pct,
-                })
-            sku_rows_view.sort(key=lambda r: -r["total_units"])
+        sku_rows_view = []
+        for k, b in buckets.items():
+            total = b["total_units"]
+            pct = (b["dropship_units"] / total * 100) if total else 0
+            if len(b["erp_skus"]) > 1:
+                primary = sorted(b["erp_skus"])[0]
+                erp_display = f"{primary} (+{len(b['erp_skus']) - 1})"
+            else:
+                erp_display = b["erp_skus"][0]
+            sku_rows_view.append({
+                "erp_sku": erp_display,
+                "shopify_sku": b["shopify_sku"],
+                "local_units": b["local_units"],
+                "dropship_units": b["dropship_units"],
+                "total_units": total,
+                "dropship_pct": pct,
+            })
+        sku_rows_view.sort(key=lambda r: -r["total_units"])
 
         # Build display rows with color flagging
         def _drop_emoji(pct):
