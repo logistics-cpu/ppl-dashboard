@@ -1060,21 +1060,57 @@ def get_local_vs_dropship_by_sku(start_ym, end_ym=None, limit=200):
       DROPSHIP = everything else — China origin to anywhere, any warehouse
               to HI/AK/PR, or cross-region.
 
+    Shopify SKU returned is the DOMINANT one (highest units sold) for
+    each ERP SKU, since the agency may use multiple Shopify SKUs for the
+    same physical product.
+
     Returns rows: erp_sku, shopify_sku, local_units, dropship_units,
                    total_units, dropship_pct
     """
     end_ym = end_ym or start_ym
     sql = f"""
+        WITH base AS (
+            SELECT
+                COALESCE(NULLIF(erp_sku, ''), '(no ERP SKU)') AS erp_sku,
+                shopify_sku,
+                {_LVD_CLASSIFICATION} AS origin,
+                quantity
+            FROM dropship_orders
+            WHERE substr(paid_at_local, 1, 7) BETWEEN ? AND ?
+        ),
+        dominant AS (
+            -- Pick the shopify_sku with the highest unit count per erp_sku,
+            -- ignoring null / 'nan' / 'no platformsku' placeholders unless
+            -- they're the only option.
+            SELECT erp_sku, shopify_sku
+            FROM (
+                SELECT erp_sku, shopify_sku, SUM(quantity) AS u,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY erp_sku
+                           ORDER BY
+                               CASE
+                                   WHEN shopify_sku IS NULL
+                                        OR shopify_sku = ''
+                                        OR LOWER(shopify_sku) IN ('nan', 'no platformsku')
+                                   THEN 1 ELSE 0
+                               END,
+                               SUM(quantity) DESC
+                       ) AS rn
+                FROM base
+                GROUP BY erp_sku, shopify_sku
+            )
+            WHERE rn = 1
+        )
         SELECT
-            COALESCE(NULLIF(erp_sku, ''), '(no ERP SKU)') AS erp_sku,
-            MIN(shopify_sku) AS shopify_sku,
-            SUM(CASE WHEN {_LVD_CLASSIFICATION} = 'Local' THEN quantity ELSE 0 END) AS local_units,
-            SUM(CASE WHEN {_LVD_CLASSIFICATION} = 'Dropship' THEN quantity ELSE 0 END) AS dropship_units,
-            SUM(quantity) AS total_units
-        FROM dropship_orders
-        WHERE substr(paid_at_local, 1, 7) BETWEEN ? AND ?
-        GROUP BY erp_sku
-        HAVING SUM(quantity) > 0
+            b.erp_sku,
+            d.shopify_sku,
+            SUM(CASE WHEN b.origin = 'Local' THEN b.quantity ELSE 0 END) AS local_units,
+            SUM(CASE WHEN b.origin = 'Dropship' THEN b.quantity ELSE 0 END) AS dropship_units,
+            SUM(b.quantity) AS total_units
+        FROM base b
+        LEFT JOIN dominant d ON d.erp_sku = b.erp_sku
+        GROUP BY b.erp_sku, d.shopify_sku
+        HAVING SUM(b.quantity) > 0
         ORDER BY total_units DESC
         LIMIT ?
     """
