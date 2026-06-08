@@ -334,9 +334,9 @@ else:
     sku_rows = get_local_vs_dropship_by_sku(lvd_start_ym, lvd_end_ym, limit=500)
 
     if sku_rows:
-        # Optional: merge old/new SKU variants (e.g. J11268-newyellow-Set
-        # + J23267-newyellow-Set are the same product, just different ERP
-        # prefixes). When the toggle is on we group SKUs by suffix.
+        # Always merge old/new SKU variants — J<digits>-* SKUs with the same
+        # suffix are treated as the same product. (e.g. J11268-newyellow-Set
+        # + J23267-newyellow-Set → one row). PPL SKUs (108731-...) untouched.
         import re as _re
 
         def _canonical_key(sku):
