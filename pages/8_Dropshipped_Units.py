@@ -346,12 +346,13 @@ else:
 
         merge_variants = st.checkbox(
             "🔀 Merge old/new SKU variants "
-            "(J11268-newyellow-Set + J23267-newyellow-Set → same product)",
-            value=False,
+            "(e.g. J11268-newyellow-Set + J23267-newyellow-Set → same product)",
+            value=True,
             key="lvd_merge_variants",
             help=(
                 "When enabled, J<digits>-* SKUs with the same suffix are "
-                "summed together. PPL SKUs (108731-...) are not affected."
+                "summed together. PPL SKUs (108731-...) are not affected. "
+                "Uncheck to see each variant separately."
             ),
         )
 
