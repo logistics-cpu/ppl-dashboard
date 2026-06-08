@@ -380,17 +380,26 @@ else:
     sku_rows = _c_local_vs_dropship_by_sku(lvd_start_ym, lvd_end_ym)
 
     if sku_rows:
-        # Always merge old/new SKU variants — J<digits>-* SKUs with the same
-        # suffix are treated as the same product. (e.g. J11268-newyellow-Set
-        # + J23267-newyellow-Set → one row). PPL SKUs (108731-...) untouched.
+        # Merge old/new ERP variants that refer to the same physical product.
+        # Only the known equivalent prefix pairs are merged — other J-prefix
+        # SKUs that happen to share a suffix (e.g. J11268-black, J11939-black,
+        # J12570-black are three different products) stay separate.
         import re as _re
 
+        # Known old → new ERP prefix pairs for the SAME product line.
+        # Add new equivalencies here as you discover them.
+        EQUIVALENT_ERP_PREFIXES = {"J11268", "J23267"}
+
         def _canonical_key(sku):
-            """For J<digits>- SKUs, return the suffix (lowercased) as the
-            merge key. For other SKUs, return the original — they don't get
-            merged."""
-            m = _re.match(r"^J\d+-(.+)$", sku or "")
-            return m.group(1).lower() if m else sku
+            """For SKUs whose prefix is in the equivalence set, return a
+            canonical key based on suffix (lowercased). For everything else,
+            return the original SKU so it stands alone."""
+            m = _re.match(r"^(J\d+)-(.+)$", sku or "")
+            if m:
+                prefix, suffix = m.group(1), m.group(2)
+                if prefix in EQUIVALENT_ERP_PREFIXES:
+                    return f"__variant__{suffix.lower()}"
+            return sku
 
         # Always merge old/new SKU variants. J<digits>- SKUs with the same
         # suffix are treated as the same product. PPL SKUs (108731-...) are
