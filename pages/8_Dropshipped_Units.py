@@ -68,6 +68,21 @@ def _c_dropship_orders(start_date, end_date, warehouse, country, limit):
         warehouse=warehouse, country=country, limit=limit,
     )
 
+@_st_cache.cache_data(ttl=600, show_spinner=False)
+def _c_all_dropship_months():
+    """All YYYY-MM that have any dropship data. Used to populate the
+    Local vs Dropship Period picker. Cached because this runs even when
+    the user only changes the period dropdown (a Streamlit full rerun)."""
+    from core.database import get_db as _gdb
+    with _gdb() as _conn:
+        return [
+            r["ym"] for r in _conn.execute(
+                "SELECT DISTINCT substr(paid_at_local, 1, 7) AS ym "
+                "FROM dropship_orders WHERE paid_at_local IS NOT NULL "
+                "ORDER BY ym DESC"
+            ).fetchall() if r["ym"]
+        ]
+
 page_header(
     "Dropshipped Units",
     "China → US / CA / AU dropshipped units (excl. HI / AK / PR)",
@@ -306,17 +321,9 @@ st.caption(
     "shows the variant count._"
 )
 
-# Month picker — use the broader 'available months from all dropship data'
-# (not the standard-rules version)
-from core.database import get_db as _gdb
-with _gdb() as _conn:
-    _all_months = [
-        r["ym"] for r in _conn.execute(
-            "SELECT DISTINCT substr(paid_at_local, 1, 7) AS ym "
-            "FROM dropship_orders WHERE paid_at_local IS NOT NULL "
-            "ORDER BY ym DESC"
-        ).fetchall() if r["ym"]
-    ]
+# Month picker — use the broader 'available months from all dropship data'.
+# Cached so changing the Period dropdown doesn't re-hit Turso for this list.
+_all_months = _c_all_dropship_months()
 
 if not _all_months:
     st.info("No dropship data yet — upload via Data Management → Dropship Upload.")
@@ -365,12 +372,16 @@ else:
     )
     lvd_start_ym, lvd_end_ym = lvd_period_ranges[lvd_period]
 
-    # Summary KPIs
-    summary = _c_local_vs_dropship_summary(lvd_start_ym, lvd_end_ym)
-    local_u = summary.get("local_units") or 0
-    drop_u = summary.get("dropship_units") or 0
-    total_u = summary.get("total_units") or 0
-    sku_n = summary.get("sku_count") or 0
+    # Per-SKU table — fetched FIRST so we can compute summary KPIs from
+    # it without a second Turso round-trip. This saves ~300ms per
+    # period change (Turso is in Tokyo, ~150ms RTT × 2).
+    sku_rows = _c_local_vs_dropship_by_sku(lvd_start_ym, lvd_end_ym)
+
+    # Summary KPIs derived from the rows we already have
+    local_u = sum((r.get("local_units") or 0) for r in sku_rows)
+    drop_u = sum((r.get("dropship_units") or 0) for r in sku_rows)
+    total_u = local_u + drop_u
+    sku_n = len(sku_rows)
     overall_pct = (drop_u / total_u * 100) if total_u else 0
 
     k1, k2, k3, k4 = st.columns(4)
@@ -378,9 +389,6 @@ else:
     k2.metric("Local units", f"{local_u:,}")
     k3.metric("Dropship units", f"{drop_u:,}")
     k4.metric("Overall Dropship %", f"{overall_pct:.0f}%")
-
-    # Per-SKU table
-    sku_rows = _c_local_vs_dropship_by_sku(lvd_start_ym, lvd_end_ym)
 
     if sku_rows:
         # Explicit SKU equivalence groups. Each list represents ONE physical
@@ -651,6 +659,26 @@ else:
         st.info(f"No data for {lvd_period}.")
 
 st.markdown("---")
+
+# ---------------------------------------------------------------------------
+# "All Dropship Orders" generic view — collapsed by default so its 100k-row
+# Turso fetch doesn't slow down the page for users who only want the
+# Local vs Dropship analysis above.
+# ---------------------------------------------------------------------------
+_show_all = st.toggle(
+    "🔍 Show All Dropship Orders (generic filterable view)",
+    value=False,
+    key="ds_show_all",
+    help="Hidden by default — loading the full order set takes a few seconds.",
+)
+
+if not _show_all:
+    st.caption(
+        "Toggle on above to load the generic order-level view with date / warehouse / "
+        "country filters, KPIs, donut charts, and the order detail table."
+    )
+    st.stop()
+
 st.markdown("## 🔍 All Dropship Orders")
 st.caption("Generic filterable view of every dropship row (all warehouses, all destinations).")
 
@@ -681,16 +709,36 @@ with fcol3:
         "Show", options=[100, 250, 500, 1000, 2000], index=2, key="ds_limit",
     )
 
-# Load summary in range for filter options + KPIs
-in_range = _c_dropship_orders(
-    f_start.isoformat(), f_end.isoformat(), None, None, 20000,
-)
-warehouse_options = ["All warehouses"] + sorted({
-    r["warehouse"] for r in in_range if r.get("warehouse")
-})
-country_options = ["All countries"] + sorted({
-    r["country"] for r in in_range if r.get("country")
-})
+# Fetch dropdown options via a tiny DISTINCT query instead of pulling
+# 20,000 rows just to derive unique warehouses/countries. This saves a
+# big Turso fetch every time the date range changes.
+@_st_cache.cache_data(ttl=600, show_spinner=False)
+def _c_filter_options(start_iso, end_iso):
+    from core.database import get_db as _gdb
+    with _gdb() as _conn:
+        whs = [
+            r["warehouse"] for r in _conn.execute(
+                "SELECT DISTINCT warehouse FROM dropship_orders "
+                "WHERE paid_at_local >= ? AND paid_at_local <= ? "
+                "  AND warehouse IS NOT NULL AND warehouse != '' "
+                "ORDER BY warehouse",
+                (start_iso, end_iso),
+            ).fetchall()
+        ]
+        ctrys = [
+            r["country"] for r in _conn.execute(
+                "SELECT DISTINCT country FROM dropship_orders "
+                "WHERE paid_at_local >= ? AND paid_at_local <= ? "
+                "  AND country IS NOT NULL AND country != '' "
+                "ORDER BY country",
+                (start_iso, end_iso),
+            ).fetchall()
+        ]
+    return whs, ctrys
+
+_whs, _ctrys = _c_filter_options(f_start.isoformat(), f_end.isoformat())
+warehouse_options = ["All warehouses"] + _whs
+country_options = ["All countries"] + _ctrys
 
 fc1, fc2 = st.columns(2)
 with fc1:
