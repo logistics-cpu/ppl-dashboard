@@ -434,8 +434,10 @@ else:
             total = b["total_units"]
             pct = (b["dropship_units"] / total * 100) if total else 0
             erp_skus_sorted = sorted(b["erp_skus"])
+            # Show all merged SKUs joined by ' + ' so the user can verify
+            # the merge. For unmerged rows just show the single SKU.
             if len(erp_skus_sorted) > 1:
-                erp_display = f"{erp_skus_sorted[0]} (+{len(erp_skus_sorted) - 1})"
+                erp_display = " + ".join(erp_skus_sorted)
             else:
                 erp_display = erp_skus_sorted[0]
             sku_rows_view.append({
