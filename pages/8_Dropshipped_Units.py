@@ -383,25 +383,87 @@ else:
     sku_rows = _c_local_vs_dropship_by_sku(lvd_start_ym, lvd_end_ym)
 
     if sku_rows:
-        # Merge old/new ERP variants that refer to the same physical product.
-        # Only the known equivalent prefix pairs are merged — other J-prefix
-        # SKUs that happen to share a suffix (e.g. J11268-black, J11939-black,
-        # J12570-black are three different products) stay separate.
-        import re as _re
+        # Explicit SKU equivalence groups. Each list represents ONE physical
+        # product that the warehouse might code under multiple SKUs (old/new
+        # naming, alternate codes, etc.). The first SKU in each list is the
+        # canonical/display name.
+        #
+        # To add a new equivalence: just append a list of SKUs here.
+        SKU_EQUIVALENCE_GROUPS = [
+            # ─── Nursing pillow: Cream / Yellow line ────────────────────
+            ["J11268-newyellow-Set", "J23267-newyellow-Set"],            # Blissful Bundle
+            ["J11268-newyellow-small", "J23267-newyellow-small",
+             "J11268-newapricot-small", "J23267-SilentVelcro"],           # BMP
+            ["J11268-newyellow-large", "J23267-newyellow-large"],        # FBP
 
-        # Known old → new ERP prefix pairs for the SAME product line.
-        # Add new equivalencies here as you discover them.
-        EQUIVALENT_ERP_PREFIXES = {"J11268", "J23267"}
+            # ─── Turquoise / Blue line ──────────────────────────────────
+            ["J11268-newblue-set",   "J23267-newblue-set"],              # Combo turquoise
+            ["J11268-newblue-small", "J23267-newblue-small"],            # BMP turquoise
+            ["J11268-newblue-large", "J23267-newblue-large"],            # FBP turquoise
+
+            # ─── Peach / Pink line ──────────────────────────────────────
+            ["J11268-newpink-set",   "J23267-newpink-set"],              # Combo peach
+            ["J11268-newpink-small", "J23267-newpink-small"],            # BMP peach
+            ["J11268-newpink-large", "J23267-newpink-large"],            # FBP peach
+
+            # ─── Pillow Covers ──────────────────────────────────────────
+            ["J11268-newyellow-small-1", "J23267-newyellow-smallcover"], # BMP Pillow Cover
+            ["J11268-newyellow-large-1", "J23267-newyellow-largecover",
+             "J11268-pillowcase-FBA"],                                    # FBP Pillow Cover
+            ["J11268-newblue-smallcover",  "J23267-newblue-smallcover"], # BMP cover turquoise
+            ["J11268-newblue-largecover",  "J23267-newblue-largecover"], # FBP cover turquoise
+            ["J11268-newpink-smallcover",  "J23267-newpink-smallcover"], # BMP cover peach
+            ["J11268-newpink-largecover",  "J23267-newpink-largecover"], # FBP cover peach
+
+            # ─── Ice Cool line ──────────────────────────────────────────
+            ["J11268-ice-Set",          "J23267-ice-Set"],               # Ice Cool Blissful Bundle
+            ["J11268-ice-small",        "J23267-ice-small"],             # Ice Cool BMP
+            ["J11268-ice-large",        "J23267-ice-large"],             # Ice Cool FBP
+            ["J11268-ice-smallcover",   "J23267-ice-smallcover"],        # Ice Cool BMP Pillow Cover
+            ["J11268-ice-largecover",   "J23267-ice-largecover"],        # Ice Cool FBP Pillow Cover
+
+            # ─── PPL Postpartum Recovery Leggings (7/8) ─────────────────
+            ["108731-blackBB-high7-XS", "108731-Newblack-high-XS"],
+            ["108731-blackBB-high7-S",  "108731-Newblack-high-S"],
+            ["108731-blackBB-high7-M",  "108731-Newblack-high-M"],
+            ["108731-blackBB-high7-L",  "108731-Newblack-high-L"],
+            ["108731-blackBB-high7-XL", "108731-Newblack-high-XL"],
+
+            # ─── PPL Postpartum Recovery Leggings (Short) ───────────────
+            ["108731-blackBB-highshort-XS", "108731-Newblack-highshort-XS"],
+            ["108731-blackBB-highshort-S",  "108731-Newblack-highshort-S"],
+            ["108731-blackBB-highshort-M",  "108731-Newblack-highshort-M"],
+            ["108731-blackBB-highshort-L",  "108731-Newblack-highshort-L"],
+            ["108731-blackBB-highshort-XL", "108731-Newblack-highshort-XL"],
+
+            # ─── Maternity Legging (long) ───────────────────────────────
+            ["108731-black-XS", "108731-blackBB-middle-XS", "108731-Newblack-XS"],
+            ["108731-black-S",  "108731-blackBB-middle-S",  "108731-Newblack-S"],
+            ["108731-black-M",  "108731-blackBB-middle-M",  "108731-Newblack-M"],
+            ["108731-black-L",  "108731-blackBB-middle-L",  "108731-Newblack-L"],
+            ["108731-black-XL", "108731-blackBB-middle-XL", "108731-Newblack-XL"],
+
+            # ─── Maternity Legging (Short) ──────────────────────────────
+            ["108731-blackBB-middleshort-XS", "108731-Newblack-middleshort-XS"],
+            ["108731-blackBB-middleshort-S",  "108731-Newblack-middleshort-S"],
+            ["108731-blackBB-middleshort-M",  "108731-Newblack-middleshort-M"],
+            ["108731-blackBB-middleshort-L",  "108731-Newblack-middleshort-L"],
+            ["108731-blackBB-middleshort-XL", "108731-Newblack-middleshort-XL"],
+        ]
+
+        # Build a lowercased lookup so case differences (e.g. 'newblue-set'
+        # vs 'newblue-Set') don't split a group.
+        _SKU_TO_GROUP = {}
+        for _grp in SKU_EQUIVALENCE_GROUPS:
+            _canonical = _grp[0]
+            for _s in _grp:
+                _SKU_TO_GROUP[_s.lower()] = _canonical
 
         def _canonical_key(sku):
-            """For SKUs whose prefix is in the equivalence set, return a
-            canonical key based on suffix (lowercased). For everything else,
-            return the original SKU so it stands alone."""
-            m = _re.match(r"^(J\d+)-(.+)$", sku or "")
-            if m:
-                prefix, suffix = m.group(1), m.group(2)
-                if prefix in EQUIVALENT_ERP_PREFIXES:
-                    return f"__variant__{suffix.lower()}"
+            """Return the canonical group name for a SKU, or the SKU itself
+            if it's not in any equivalence group (stands alone)."""
+            if sku and sku.lower() in _SKU_TO_GROUP:
+                return _SKU_TO_GROUP[sku.lower()]
             return sku
 
         # Group by ERP SKU (canonical) only. The Shopify SKU column shows
