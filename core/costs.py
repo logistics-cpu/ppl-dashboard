@@ -30,6 +30,14 @@ from core.database import get_db, get_setting, invalidate_cache
 
 REGION_US = "US"
 
+# Component classification for the fixed/variable cost split:
+# FIXED costs only change when someone edits them. VARIABLE costs move on
+# their own as new freight / rent / billing data arrives.
+FIXED_COMPONENTS = ["product_cost", "agent_fee", "pick_pack", "pink_box", "other_box"]
+VARIABLE_COMPONENTS = [
+    "domestic_freight", "sea_freight", "warehouse_rent", "inbound", "local_shipping",
+]
+
 # Accessory SKUs that mark bundle order types in the 3PL billing data
 BAG_SKU = "J22165-BABYBUB-28*42"          # legging packaging bag → type B
 LARGEBOX_SKU = "J11268-LARGEBOX-46*35*16"  # cozy bundle box → type C
@@ -699,6 +707,9 @@ def assemble_cost_table(region=REGION_US, lastmile_start=None, lastmile_end=None
     rate_card = get_rate_card(region)
     unload_rate = float(get_setting("cost_us_unload_rate_per_cbm", "6.2"))
     default_days = int(float(get_setting("cost_us_default_storage_days", "90")))
+    rent_method = get_setting("cost_us_rent_method", "assumed")
+    rent_window = int(float(get_setting("cost_us_rent_window_months", "3")))
+    actual_rents = get_actual_rent_per_unit(region, rent_window)
     singles, pooled = get_lastmile_averages(region, lastmile_start, lastmile_end)
     coverpairs = get_coverpair_averages(region, lastmile_start, lastmile_end)
     withbag = get_withbag_sums(region, lastmile_start, lastmile_end)
@@ -731,21 +742,36 @@ def assemble_cost_table(region=REGION_US, lastmile_start=None, lastmile_end=None
             sea = 0.0
             missing.append("sea")
 
-        # --- warehouse rent (only SKUs present in the rent table) ---
+        # --- warehouse rent ---
+        # Two methods, both always computed for display:
+        #   assumed = unit CBM x assumed days x age-bracket rates
+        #   actual  = 3PL-billed rent / units shipped (rolling window)
+        # The cost_us_rent_method setting picks which one feeds the
+        # official Total/Landed (with assumed as fallback when a SKU has
+        # no rent billing history yet). Overrides trump both.
+        rent_spec = next(
+            (specs[k] for k in cands if k in specs and specs[k]["in_rent_table"]),
+            None,
+        )
+        rent_assumed = None
+        if rent_spec:
+            cbm = rent_spec["rent_unit_cbm"] or rent_spec["unit_cbm"]
+            days = rent_spec["assumed_storage_days"] or default_days
+            rent_assumed = compute_rent_per_unit(cbm, days, brackets) if cbm else None
+        rent_actual = next(
+            (actual_rents[k]["per_unit"] for k in cands
+             if k in actual_rents and actual_rents[k]["per_unit"] is not None),
+            None,
+        )
         if p["rent_override"] is not None:
             rent = p["rent_override"]
+        elif rent_method == "actual" and rent_actual is not None:
+            rent = rent_actual
+        elif rent_assumed is not None:
+            rent = rent_assumed
         else:
-            rent_spec = next(
-                (specs[k] for k in cands if k in specs and specs[k]["in_rent_table"]),
-                None,
-            )
-            if rent_spec:
-                cbm = rent_spec["rent_unit_cbm"] or rent_spec["unit_cbm"]
-                days = rent_spec["assumed_storage_days"] or default_days
-                rent = compute_rent_per_unit(cbm, days, brackets) if cbm else 0.0
-            else:
-                rent = 0.0
-                missing.append("rent")
+            rent = 0.0
+            missing.append("rent")
 
         # --- inbound (only SKUs present in the SKU Master) ---
         if p["inbound_override"] is not None:
@@ -824,11 +850,15 @@ def assemble_cost_table(region=REGION_US, lastmile_start=None, lastmile_end=None
             "domestic_freight": domestic,
             "sea_freight": sea,
             "warehouse_rent": rent,
+            "rent_assumed": rent_assumed,
+            "rent_actual": rent_actual,
             "inbound": inbound,
             "local_shipping": lastmile,
             "pick_pack": pick_pack,
             "pink_box": pink_box,
             "other_box": other_box,
+            "fixed_cost": product_cost + agent_fee + pick_pack + pink_box + other_box,
+            "variable_cost": domestic + sea + rent + inbound + lastmile,
             "total_cost": total,
             "landed_cost": landed,
             "missing": missing,
@@ -925,6 +955,169 @@ def get_snapshot_dates(region=REGION_US):
                 (region,),
             ).fetchall()
         ]
+
+
+# ===========================================================================
+# Actual warehouse rent (3PL 仓租费 export)
+# ===========================================================================
+
+# Header candidates in the 仓租 export. The export is Chinese-ERP style with
+# daily SKU-level lines. Amount column name varies by portal version, so we
+# try several known ones.
+RENT_EXPORT_DETECT_COLS = {"仓租单号", "仓租日期"}
+_RENT_AMOUNT_CANDIDATES = ["计费金额", "应收金额", "费用金额", "金额", "仓租费用"]
+_RENT_DATE_CANDIDATES = ["仓租日期", "计费时间"]
+_RENT_WAREHOUSE_CANDIDATES = ["计费仓库", "仓库"]
+_RENT_QTY_CANDIDATES = ["SKU数量", "数量"]
+
+
+def parse_rent_export(df, region=REGION_US):
+    """
+    Parse a raw 3PL storage-rent (仓租费) export DataFrame into monthly
+    aggregates ready for replace_rent_monthly_in_range.
+
+    Returns (rows, stats) where rows have ym/sku/warehouse/rent_amount/
+    line_count/avg_qty and stats describes what was parsed/skipped.
+    """
+    import pandas as pd
+
+    cols = set(df.columns)
+    amount_col = next((c for c in _RENT_AMOUNT_CANDIDATES if c in cols), None)
+    date_col = next((c for c in _RENT_DATE_CANDIDATES if c in cols), None)
+    wh_col = next((c for c in _RENT_WAREHOUSE_CANDIDATES if c in cols), None)
+    qty_col = next((c for c in _RENT_QTY_CANDIDATES if c in cols), None)
+    if not amount_col or not date_col or "SKU" not in cols:
+        raise ValueError(
+            "Unrecognized rent export — needs SKU, a date column "
+            f"({'/'.join(_RENT_DATE_CANDIDATES)}) and an amount column "
+            f"({'/'.join(_RENT_AMOUNT_CANDIDATES)}). Found: {sorted(cols)[:20]}"
+        )
+
+    agg = {}
+    skipped = 0
+    for _, r in df.iterrows():
+        sku = r.get("SKU")
+        if sku is None or (isinstance(sku, float) and pd.isna(sku)):
+            skipped += 1
+            continue
+        try:
+            ym = pd.to_datetime(r[date_col]).strftime("%Y-%m")
+        except Exception:
+            skipped += 1
+            continue
+        amt = r[amount_col]
+        if pd.isna(amt):
+            skipped += 1
+            continue
+        wh = r.get(wh_col) if wh_col else None
+        wh = str(wh).strip() if wh is not None and pd.notna(wh) else None
+        key = (ym, _u(str(sku)), wh)
+        e = agg.setdefault(key, {"rent": 0.0, "n": 0, "qty_sum": 0.0, "qty_n": 0})
+        e["rent"] += float(amt)
+        e["n"] += 1
+        if qty_col and pd.notna(r.get(qty_col)):
+            e["qty_sum"] += float(r[qty_col])
+            e["qty_n"] += 1
+
+    rows = [
+        {
+            "region": region, "ym": ym, "sku": sku, "warehouse": wh,
+            "rent_amount": round(e["rent"], 4),
+            "line_count": e["n"],
+            "avg_qty": (e["qty_sum"] / e["qty_n"]) if e["qty_n"] else None,
+        }
+        for (ym, sku, wh), e in agg.items()
+    ]
+    stats = {
+        "lines_in": len(df),
+        "skipped": skipped,
+        "rows_out": len(rows),
+        "months": sorted({r["ym"] for r in rows}),
+        "skus": len({r["sku"] for r in rows}),
+        "total_rent": round(sum(r["rent_amount"] for r in rows), 2),
+        "amount_col": amount_col,
+    }
+    return rows, stats
+
+
+def replace_rent_monthly_in_range(ym_start, ym_end, rows, region=REGION_US):
+    """Replace monthly rent aggregates in [ym_start, ym_end] (idempotent)."""
+    with get_db() as conn:
+        conn.execute(
+            "DELETE FROM cost_rent_monthly "
+            "WHERE region = ? AND ym BETWEEN ? AND ?",
+            (region, ym_start, ym_end),
+        )
+        n = _bulk_insert(
+            conn, "cost_rent_monthly",
+            ["region", "ym", "sku", "warehouse", "rent_amount",
+             "line_count", "avg_qty"],
+            rows,
+        )
+        conn.commit()
+    invalidate_cache()
+    return n
+
+
+def get_rent_monthly(region=REGION_US):
+    with get_db() as conn:
+        return [
+            dict(r) for r in conn.execute(
+                "SELECT ym, sku, warehouse, rent_amount, line_count, avg_qty "
+                "FROM cost_rent_monthly WHERE region = ? ORDER BY ym, sku",
+                (region,),
+            ).fetchall()
+        ]
+
+
+def get_actual_rent_per_unit(region=REGION_US, window_months=3):
+    """
+    Actual rent $/unit per SKU: rent billed by the 3PL over the last
+    `window_months` months of rent data, divided by units shipped of that
+    SKU in the same months (from dropship_orders — the regular ERP order
+    upload). SKU matching is case-insensitive.
+
+    Returns {UPPER_SKU: {rent_billed, units_shipped, per_unit,
+                         months (list of YYYY-MM)}}
+    """
+    with get_db() as conn:
+        ym_rows = conn.execute(
+            "SELECT DISTINCT ym FROM cost_rent_monthly WHERE region = ? "
+            "ORDER BY ym DESC LIMIT ?",
+            (region, int(window_months)),
+        ).fetchall()
+        months = sorted(r["ym"] for r in ym_rows)
+        if not months:
+            return {}
+        placeholders = ",".join("?" * len(months))
+
+        rent_rows = conn.execute(
+            f"SELECT sku, SUM(rent_amount) AS rent FROM cost_rent_monthly "
+            f"WHERE region = ? AND ym IN ({placeholders}) GROUP BY sku",
+            [region] + months,
+        ).fetchall()
+
+        ship_rows = conn.execute(
+            f"SELECT UPPER(erp_sku) AS sku, SUM(quantity) AS units "
+            f"FROM dropship_orders "
+            f"WHERE substr(paid_at_local, 1, 7) IN ({placeholders}) "
+            f"  AND erp_sku IS NOT NULL AND erp_sku != '' "
+            f"GROUP BY UPPER(erp_sku)",
+            months,
+        ).fetchall()
+
+    shipped = {r["sku"]: r["units"] for r in ship_rows}
+    out = {}
+    for r in rent_rows:
+        sku = _u(r["sku"])
+        units = shipped.get(sku) or 0
+        out[sku] = {
+            "rent_billed": r["rent"],
+            "units_shipped": units,
+            "per_unit": (r["rent"] / units) if units else None,
+            "months": months,
+        }
+    return out
 
 
 # ===========================================================================

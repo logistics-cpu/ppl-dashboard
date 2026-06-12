@@ -499,6 +499,23 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_lastmile_type
                 ON cost_lastmile_orders(order_type);
 
+            -- Actual warehouse rent billed by the 3PL, aggregated to
+            -- month x SKU x warehouse at upload time (raw export is daily
+            -- SKU-level lines and would bloat Turso)
+            CREATE TABLE IF NOT EXISTS cost_rent_monthly (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                region TEXT NOT NULL DEFAULT 'US',
+                ym TEXT NOT NULL,
+                sku TEXT NOT NULL,
+                warehouse TEXT,
+                rent_amount REAL NOT NULL,
+                line_count INTEGER,
+                avg_qty REAL,
+                UNIQUE(region, ym, sku, warehouse)
+            );
+            CREATE INDEX IF NOT EXISTS idx_rent_monthly_sku
+                ON cost_rent_monthly(sku);
+
             -- Cost history: one row per SKU per day (re-snapshot replaces)
             CREATE TABLE IF NOT EXISTS cost_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -558,6 +575,10 @@ def _seed_default_settings(conn):
         # Product Cost model (US region)
         "cost_us_unload_rate_per_cbm": "6.2",
         "cost_us_default_storage_days": "90",
+        # Which rent feeds official Total/Landed: 'assumed' or 'actual'
+        "cost_us_rent_method": "assumed",
+        # Rolling window (months) for actual-rent-per-unit averaging
+        "cost_us_rent_window_months": "3",
     }
     for key, value in defaults.items():
         conn.execute(
