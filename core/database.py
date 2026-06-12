@@ -373,8 +373,10 @@ def init_db():
 
             -- ════════════════════════════════════════════════════════════
             -- Product Cost model (migrated from "📦 Product Cost 2026.xlsx")
-            -- All SKU columns store UPPERCASE-normalized values; joins are
-            -- case-insensitive. region defaults 'US' — other regions later.
+            -- All SKU columns store UPPERCASE-normalized values and joins
+            -- are case-insensitive. region defaults 'US' for now.
+            -- NOTE: executescript on Turso splits on semicolons, so never
+            -- put one inside a comment here.
             -- ════════════════════════════════════════════════════════════
 
             -- One row per Shopify SKU (the Excel 'US ' master sheet)
