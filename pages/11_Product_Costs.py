@@ -192,9 +192,9 @@ def _frag_summary():
         )
         display.append({
             "⚠️": "⚠️ " + ",".join(r["missing"]) if r["missing"] else "",
-            "Product": r["product_name"],
-            "Shopify SKU": r["display_sku"],
             "China SKUs": china_skus or "—",
+            "Shopify SKU": r["display_sku"],
+            "Product": r["product_name"],
             "Product Cost": r["product_cost"],
             "Agent Fee": r["agent_fee"],
             "Domestic": r["domestic_freight"],
