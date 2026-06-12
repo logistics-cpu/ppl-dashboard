@@ -370,6 +370,155 @@ def init_db():
                 started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 completed_at TIMESTAMP
             );
+
+            -- ════════════════════════════════════════════════════════════
+            -- Product Cost model (migrated from "📦 Product Cost 2026.xlsx")
+            -- All SKU columns store UPPERCASE-normalized values; joins are
+            -- case-insensitive. region defaults 'US' — other regions later.
+            -- ════════════════════════════════════════════════════════════
+
+            -- One row per Shopify SKU (the Excel 'US ' master sheet)
+            CREATE TABLE IF NOT EXISTS cost_products (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                region TEXT NOT NULL DEFAULT 'US',
+                shopify_sku TEXT NOT NULL,
+                display_sku TEXT,
+                product_name TEXT,
+                category TEXT,
+                china_sku1 TEXT,
+                china_sku2 TEXT,
+                is_composite INTEGER NOT NULL DEFAULT 0,
+                -- manual $ inputs
+                product_cost REAL,
+                agent_fee REAL,
+                pick_pack REAL,
+                pink_box REAL,
+                other_box REAL,
+                -- when set, used INSTEAD of the computed lookup (composites)
+                domestic_override REAL,
+                sea_override REAL,
+                rent_override REAL,
+                inbound_override REAL,
+                lastmile_override REAL,
+                lastmile_group TEXT NOT NULL DEFAULT 'SINGLE',
+                notes TEXT,
+                active INTEGER NOT NULL DEFAULT 1,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(region, shopify_sku)
+            );
+
+            -- Composite product definitions (forward path for bundles)
+            CREATE TABLE IF NOT EXISTS cost_product_components (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                region TEXT NOT NULL DEFAULT 'US',
+                parent_sku TEXT NOT NULL,
+                component_sku TEXT NOT NULL,
+                multiplier REAL NOT NULL DEFAULT 1
+            );
+
+            -- Per-SKU physical specs (MasterData + SKU Master merged)
+            CREATE TABLE IF NOT EXISTS cost_sku_specs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                region TEXT NOT NULL DEFAULT 'US',
+                sku TEXT NOT NULL,
+                unit_cbm REAL,
+                unit_weight_kg REAL,
+                qty_per_ctn REAL,
+                cbm_per_ctn REAL,
+                vol_weight_ctn REAL,
+                rent_unit_cbm REAL,
+                assumed_storage_days INTEGER NOT NULL DEFAULT 90,
+                UNIQUE(region, sku)
+            );
+
+            -- Freight shipments: header (totals once) + per-SKU lines
+            CREATE TABLE IF NOT EXISTS cost_shipments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                region TEXT NOT NULL DEFAULT 'US',
+                shipment_id TEXT NOT NULL,
+                ship_date DATE,
+                dom_total REAL NOT NULL DEFAULT 0,
+                sea_total REAL NOT NULL DEFAULT 0,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(region, shipment_id)
+            );
+            CREATE TABLE IF NOT EXISTS cost_shipment_lines (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                region TEXT NOT NULL DEFAULT 'US',
+                shipment_id TEXT NOT NULL,
+                sku TEXT NOT NULL,
+                qty INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_cost_shiplines_sku
+                ON cost_shipment_lines(sku);
+            CREATE INDEX IF NOT EXISTS idx_cost_shiplines_ship
+                ON cost_shipment_lines(shipment_id);
+
+            -- Warehouse rent age brackets ($/CBM/day) — editable
+            CREATE TABLE IF NOT EXISTS cost_rent_brackets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                region TEXT NOT NULL DEFAULT 'US',
+                start_day REAL NOT NULL,
+                end_day REAL,
+                rate_per_cbm_day REAL NOT NULL
+            );
+
+            -- Inbound op-fee weight tiers — editable
+            CREATE TABLE IF NOT EXISTS cost_rate_card (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                region TEXT NOT NULL DEFAULT 'US',
+                tier_start_kg REAL NOT NULL,
+                tier_end_kg REAL,
+                op_fee REAL NOT NULL
+            );
+
+            -- Last-mile: one row per 3PL ORDER (classified billing export)
+            CREATE TABLE IF NOT EXISTS cost_lastmile_orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                region TEXT NOT NULL DEFAULT 'US',
+                order_id TEXT NOT NULL,
+                ship_date DATE NOT NULL,
+                country TEXT,
+                shipping_cost REAL NOT NULL,
+                sku_key TEXT,
+                main_sku TEXT,
+                order_type TEXT NOT NULL,
+                total_qty INTEGER,
+                num_skus INTEGER,
+                uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_lastmile_mainsku
+                ON cost_lastmile_orders(main_sku);
+            CREATE INDEX IF NOT EXISTS idx_lastmile_date
+                ON cost_lastmile_orders(ship_date);
+            CREATE INDEX IF NOT EXISTS idx_lastmile_type
+                ON cost_lastmile_orders(order_type);
+
+            -- Cost history: one row per SKU per day (re-snapshot replaces)
+            CREATE TABLE IF NOT EXISTS cost_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_date DATE NOT NULL,
+                region TEXT NOT NULL DEFAULT 'US',
+                shopify_sku TEXT NOT NULL,
+                product_cost REAL,
+                agent_fee REAL,
+                domestic_freight REAL,
+                sea_freight REAL,
+                warehouse_rent REAL,
+                inbound REAL,
+                local_shipping REAL,
+                pick_pack REAL,
+                pink_box REAL,
+                other_box REAL,
+                total_cost REAL,
+                landed_cost REAL,
+                reason TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(snapshot_date, region, shopify_sku)
+            );
+            CREATE INDEX IF NOT EXISTS idx_cost_snap_sku
+                ON cost_snapshots(shopify_sku);
         """)
         _seed_products(conn)
         _seed_default_settings(conn)
@@ -402,6 +551,9 @@ def _seed_default_settings(conn):
     defaults = {
         "stockout_threshold_days": "14",
         "warning_threshold_days": "30",
+        # Product Cost model (US region)
+        "cost_us_unload_rate_per_cbm": "6.2",
+        "cost_us_default_storage_days": "90",
     }
     for key, value in defaults.items():
         conn.execute(
