@@ -154,7 +154,7 @@ def _frag_summary():
         "Check the ⚠️ column below."
     ))
 
-    fc1, fc2 = st.columns([3, 1])
+    fc1, fc2, fc3 = st.columns([3, 1, 1])
     with fc1:
         q = st.text_input(
             "🔍 Search product / SKU",
@@ -164,6 +164,13 @@ def _frag_summary():
     with fc2:
         cats = ["All"] + sorted({r["category"] for r in table if r["category"]})
         cat = st.selectbox("Category", cats, key="cs_category")
+    with fc3:
+        st.write("")
+        show_skus = st.toggle(
+            "Show SKU columns", value=False, key="cs_show_skus",
+            help="Show/hide the Shopify SKU and China (ERP) SKU columns. "
+                 "Search always matches them either way.",
+        )
 
     rows = table
     if q.strip():
@@ -180,10 +187,14 @@ def _frag_summary():
 
     display = []
     for r in rows:
+        china_skus = " + ".join(
+            s for s in (r["china_sku1"], r["china_sku2"]) if s
+        )
         display.append({
             "⚠️": "⚠️ " + ",".join(r["missing"]) if r["missing"] else "",
             "Product": r["product_name"],
             "Shopify SKU": r["display_sku"],
+            "China SKUs": china_skus or "—",
             "Product Cost": r["product_cost"],
             "Agent Fee": r["agent_fee"],
             "Domestic": r["domestic_freight"],
@@ -198,7 +209,12 @@ def _frag_summary():
             "LANDED": r["landed_cost"],
         })
     df = pd.DataFrame(display)
-    money_cols = [c for c in df.columns if c not in ("⚠️", "Product", "Shopify SKU")]
+    if not show_skus:
+        df = df.drop(columns=["Shopify SKU", "China SKUs"])
+    money_cols = [
+        c for c in df.columns
+        if c not in ("⚠️", "Product", "Shopify SKU", "China SKUs")
+    ]
 
     # Color-coding (mirrors the Google Sheet): yellow = manual inputs,
     # blue = auto-computed from data, gray = total, green = landed cost.
