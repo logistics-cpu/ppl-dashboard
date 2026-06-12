@@ -1405,6 +1405,8 @@ with tab_costs:
     from core.costs import (
         classify_billing_export, insert_lastmile_orders_bulk,
         delete_lastmile_in_range, take_snapshot, get_lastmile_summary,
+        parse_rent_export, replace_rent_monthly_in_range,
+        RENT_EXPORT_DETECT_COLS,
     )
 
     # ── 1. One-time workbook seed ──────────────────────────────────────
@@ -1480,8 +1482,16 @@ with tab_costs:
 
     st.markdown("---")
 
-    # ── 2. Recurring 3PL billing upload ────────────────────────────────
-    st.markdown("#### 🚚 3PL billing upload (last-mile shipping)")
+    # ── 2. Recurring 3PL fee uploads — ONE slot, auto-detected ─────────
+    st.markdown("#### 📥 3PL fee export upload")
+    st.caption(
+        "Drop **any** 3PL fee export here — the dashboard detects which "
+        "one it is and routes it:  \n"
+        "· **Billing export** (原始数据: 业务单号, 费用类型, 应收金额 …) "
+        "→ last-mile shipping averages  \n"
+        "· **Storage rent export** (仓租费: 仓租单号, 仓租日期, SKU …) "
+        "→ actual warehouse rent per SKU"
+    )
     _lm = get_lastmile_summary()
     if _lm.get("n"):
         st.info(
@@ -1490,17 +1500,74 @@ with tab_costs:
             f"({_lm.get('n_other') or 0} unclassified)"
         )
 
-    bill_file = st.file_uploader(
-        "Upload raw 3PL billing export (原始数据)",
+    fee_file = st.file_uploader(
+        "Upload 3PL fee export (billing or storage rent)",
         type=["xlsx", "xls"],
-        key="cost_billing_upload",
-        help="The raw billing export with 出库时间, 业务单号, SKU, SKU数量, "
-             "应收金额, 目的地国家 columns. Existing orders in the file's "
-             "date range are replaced.",
+        key="cost_fee_upload",
+        help="Existing data in the file's date range is replaced — "
+             "re-uploading the same file is safe.",
     )
-    if bill_file:
+    if fee_file:
         try:
-            bl_df = pd.read_excel(bill_file)
+            fee_df = pd.read_excel(fee_file)
+            fee_cols = set(fee_df.columns)
+
+            if RENT_EXPORT_DETECT_COLS & fee_cols:
+                _detected = "rent"
+                st.success("🏭 Detected: **storage rent export** (仓租费)")
+            elif {"业务单号", "费用类型"} <= fee_cols or {"业务单号", "应收金额"} <= fee_cols:
+                _detected = "billing"
+                st.success("🚚 Detected: **billing export** (原始数据 / last-mile)")
+            else:
+                st.error(
+                    "Unrecognized file. Expected either a billing export "
+                    "(业务单号 + 费用类型 + 应收金额 columns) or a storage "
+                    f"rent export ({' / '.join(sorted(RENT_EXPORT_DETECT_COLS))}). "
+                    f"Found columns: {', '.join(str(c) for c in list(fee_cols)[:15])}…"
+                )
+                st.stop()
+
+            if _detected == "rent":
+                rent_rows, rstats = parse_rent_export(fee_df)
+                if not rent_rows:
+                    st.error("No valid rent lines found in the file.")
+                    st.stop()
+                _months = rstats["months"]
+                st.success(
+                    f"Parsed **{rstats['lines_in']:,} rent lines** → "
+                    f"**{rstats['rows_out']}** month×SKU×warehouse aggregates · "
+                    f"**{rstats['skus']}** SKUs · "
+                    f"**${rstats['total_rent']:,.2f}** total rent · "
+                    f"months: {', '.join(_months)}"
+                )
+                if rstats["skipped"]:
+                    st.caption(f"{rstats['skipped']} lines skipped (no SKU/date/amount)")
+                st.warning(
+                    f"Importing will **replace** rent data for months "
+                    f"**{_months[0]}** – **{_months[-1]}**, then take a cost snapshot."
+                )
+                if st.button("Import Rent Data", type="primary", key="import_rent"):
+                    with st.status("Importing rent data…", expanded=True) as _status:
+                        st.write(f"🗑️ Replacing months {_months[0]} – {_months[-1]}…")
+                        n = replace_rent_monthly_in_range(_months[0], _months[-1], rent_rows)
+                        st.write("📸 Taking cost snapshot…")
+                        snap_n = take_snapshot(reason="upload_rent")
+                        _status.update(
+                            label=f"✅ Imported {n} rent aggregates · snapshot of {snap_n} products",
+                            state="complete", expanded=False,
+                        )
+                    log_sync("cost_rent_upload", "success", n)
+                    st.cache_data.clear()
+                    st.success(
+                        f"### ✅ Rent import complete\n\n"
+                        f"**{n}** monthly aggregates imported. See actual vs "
+                        f"assumed rent in **Product Costs → Rent & Inbound**."
+                    )
+                    st.balloons()
+                st.stop()
+
+            # _detected == "billing" — fall through to the billing pipeline
+            bl_df = fee_df
             _required = ["出库时间", "业务单号", "SKU", "SKU数量", "应收金额"]
             _missing = [c for c in _required if c not in bl_df.columns]
             if _missing:
