@@ -118,7 +118,7 @@ COMPONENTS = [
     ("local_shipping", "Local Shipping"),
     ("pick_pack", "Pick & Pack"),
     ("pink_box", "Pink Box"),
-    ("other_box", "Other Box"),
+    ("other_box", "Big Box"),
 ]
 
 
@@ -193,28 +193,37 @@ def _frag_summary():
             "Last-mile": r["local_shipping"],
             "Pick&Pack": r["pick_pack"],
             "Pink Box": r["pink_box"],
-            "Other Box": r["other_box"],
-            "Fixed": r["fixed_cost"],
-            "Variable": r["variable_cost"],
+            "Big Box": r["other_box"],
             "TOTAL": r["total_cost"],
             "LANDED": r["landed_cost"],
         })
     df = pd.DataFrame(display)
     money_cols = [c for c in df.columns if c not in ("⚠️", "Product", "Shopify SKU")]
-    st.caption(f"Showing **{len(df)}** of **{len(table)}** products")
-    st.dataframe(
-        df, use_container_width=True, hide_index=True, height=520,
-        column_config={
-            c: st.column_config.NumberColumn(format="$%.2f") for c in money_cols
-        },
+
+    # Color-coding (mirrors the Google Sheet): yellow = manual inputs,
+    # blue = auto-computed from data, gray = total, green = landed cost.
+    MANUAL_COLS = ["Product Cost", "Agent Fee", "Pick&Pack", "Pink Box", "Big Box"]
+    COMPUTED_COLS = ["Domestic", "Sea", "Rent", "Inbound", "Last-mile"]
+    styled = (
+        df.style
+        .format({c: "${:,.2f}" for c in money_cols}, na_rep="—")
+        .set_properties(subset=MANUAL_COLS, **{"background-color": "#FEF9C3"})
+        .set_properties(subset=COMPUTED_COLS, **{"background-color": "#DBEAFE"})
+        .set_properties(subset=["TOTAL"], **{
+            "background-color": "#E2E8F0", "font-weight": "bold",
+        })
+        .set_properties(subset=["LANDED"], **{
+            "background-color": "#DCFCE7", "font-weight": "bold",
+        })
     )
+    st.caption(f"Showing **{len(df)}** of **{len(table)}** products")
+    st.dataframe(styled, use_container_width=True, hide_index=True, height=520)
     st.caption(
-        "**LANDED** = product + domestic + sea + inbound + pink box (cost to "
-        "land in the US warehouse). **TOTAL** adds agent fee, rent, last-mile "
-        "shipping, pick & pack and other packaging — the all-in cost to reach "
-        "the customer. **Fixed** = costs that only change when edited "
-        "(product, agent fee, pick & pack, boxes). **Variable** = costs that "
-        "move with new data (freight, rent, inbound, last-mile)."
+        "🟨 Manual inputs (edited in ⚙️ Inputs & Settings) · "
+        "🟦 Auto-computed from freight / rent / billing data · "
+        "🟩 **LANDED** = product + domestic + sea + inbound + pink box "
+        "(cost to land in the US warehouse) · "
+        "⬜ **TOTAL** = all components — the all-in cost to reach the customer."
     )
 
     # Stacked component chart
@@ -955,7 +964,7 @@ def _frag_inputs():
             "Agent $": p["agent_fee"],
             "Pick&Pack $": p["pick_pack"],
             "Pink Box $": p["pink_box"],
-            "Other Box $": p["other_box"],
+            "Big Box $": p["other_box"],
             "Ovr Domestic": p["domestic_override"],
             "Ovr Sea": p["sea_override"],
             "Ovr Rent": p["rent_override"],
@@ -989,7 +998,7 @@ def _frag_inputs():
         "China SKU 1": "china_sku1", "China SKU 2": "china_sku2",
         "Product $": "product_cost", "Agent $": "agent_fee",
         "Pick&Pack $": "pick_pack", "Pink Box $": "pink_box",
-        "Other Box $": "other_box",
+        "Big Box $": "other_box",
         "Ovr Domestic": "domestic_override", "Ovr Sea": "sea_override",
         "Ovr Rent": "rent_override", "Ovr Inbound": "inbound_override",
         "Ovr Last-mile": "lastmile_override",
