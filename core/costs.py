@@ -207,6 +207,7 @@ def update_cost_product(product_id, fields):
 _SPEC_COLS = [
     "region", "sku", "unit_cbm", "unit_weight_kg", "qty_per_ctn",
     "cbm_per_ctn", "vol_weight_ctn", "rent_unit_cbm", "assumed_storage_days",
+    "in_sku_master", "in_rent_table",
 ]
 
 
@@ -389,70 +390,117 @@ def get_shipment_lines(region=REGION_US, shipment_id=None):
         return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
+# Standard volumetric divisor: vol weight (kg) = CBM × 1,000,000 / 6,000
+_VOL_WEIGHT_PER_CBM = 1000000.0 / 6000.0  # ≈ 166.67 kg per CBM
+
+
+def _freight_line_rates(region=REGION_US):
+    """
+    Per-shipment-line $/unit rates, replicating the Excel allocation:
+      dom $/unit = dom_total × unit_CBM ÷ Σ(shipment line CBM)
+      sea $/unit = sea_total × unit_vol_weight ÷ Σ(shipment line vol weight)
+    Unit CBM/weight come from the carton specs (MasterData): CBM/Ctn ÷
+    Qty/Ctn and Vol Weight/Ctn ÷ Qty/Ctn. Lines whose SKU has no carton
+    spec get no rate (the workbook leaves them blank too).
+
+    Returns [{sku, shipment_id, ship_date, qty, dom_per_unit, sea_per_unit}]
+    """
+    specs = {s["sku"]: s for s in get_sku_specs(region)}
+    headers = {
+        h["shipment_id"]: h
+        for h in get_shipments(region)
+    }
+    lines = get_shipment_lines(region)
+
+    def _unit_cbm(sku):
+        s = specs.get(_u(sku))
+        if not s:
+            return None
+        if s["cbm_per_ctn"] and s["qty_per_ctn"]:
+            return s["cbm_per_ctn"] / s["qty_per_ctn"]
+        return s["unit_cbm"]
+
+    def _unit_volw(sku):
+        s = specs.get(_u(sku))
+        if not s:
+            return None
+        if s["vol_weight_ctn"] and s["qty_per_ctn"]:
+            return s["vol_weight_ctn"] / s["qty_per_ctn"]
+        cbm = _unit_cbm(sku)
+        return cbm * _VOL_WEIGHT_PER_CBM if cbm else None
+
+    # Shipment totals over lines that HAVE specs (mirrors the workbook,
+    # where spec-less lines drop out of the SUMPRODUCT denominators)
+    ship_cbm = defaultdict(float)
+    ship_volw = defaultdict(float)
+    for l in lines:
+        cbm, volw = _unit_cbm(l["sku"]), _unit_volw(l["sku"])
+        if cbm:
+            ship_cbm[l["shipment_id"]] += l["qty"] * cbm
+        if volw:
+            ship_volw[l["shipment_id"]] += l["qty"] * volw
+
+    out = []
+    for l in lines:
+        h = headers.get(l["shipment_id"])
+        if not h:
+            continue
+        cbm, volw = _unit_cbm(l["sku"]), _unit_volw(l["sku"])
+        dom = sea = None
+        if cbm and ship_cbm[l["shipment_id"]]:
+            dom = h["dom_total"] * cbm / ship_cbm[l["shipment_id"]]
+        if volw and ship_volw[l["shipment_id"]]:
+            sea = h["sea_total"] * volw / ship_volw[l["shipment_id"]]
+        out.append({
+            "sku": _u(l["sku"]),
+            "shipment_id": l["shipment_id"],
+            "ship_date": h["ship_date"],
+            "qty": l["qty"],
+            "dom_per_unit": dom,
+            "sea_per_unit": sea,
+        })
+    return out
+
+
 def get_freight_averages(region=REGION_US):
     """
-    Per-SKU qty-weighted average dom/sea $/unit across shipments.
-    Replicates the Excel 'SKU Averages' tab.
+    Per-SKU average dom/sea $/unit — a simple mean across the SKU's
+    shipments, matching the Excel 'SKU Averages' tab.
 
     Returns {UPPER_SKU: {avg_dom, avg_sea, avg_total, n_shipments,
                          total_qty, min_total, max_total}}
     """
-    sql = """
-        WITH ship_units AS (
-            SELECT s.shipment_id, s.ship_date,
-                   s.dom_total * 1.0 / q.total_qty AS dom_per_unit,
-                   s.sea_total * 1.0 / q.total_qty AS sea_per_unit
-            FROM cost_shipments s
-            JOIN (
-                SELECT shipment_id, SUM(qty) AS total_qty
-                FROM cost_shipment_lines WHERE region = ?
-                GROUP BY shipment_id
-                HAVING SUM(qty) > 0
-            ) q ON q.shipment_id = s.shipment_id
-            WHERE s.region = ?
-        )
-        SELECT l.sku,
-               SUM(l.qty * u.dom_per_unit) * 1.0 / SUM(l.qty) AS avg_dom,
-               SUM(l.qty * u.sea_per_unit) * 1.0 / SUM(l.qty) AS avg_sea,
-               COUNT(DISTINCT l.shipment_id) AS n_shipments,
-               SUM(l.qty) AS total_qty,
-               MIN(u.dom_per_unit + u.sea_per_unit) AS min_total,
-               MAX(u.dom_per_unit + u.sea_per_unit) AS max_total
-        FROM cost_shipment_lines l
-        JOIN ship_units u ON u.shipment_id = l.shipment_id
-        WHERE l.region = ?
-        GROUP BY l.sku
-    """
+    per_sku = defaultdict(list)
+    for r in _freight_line_rates(region):
+        if r["dom_per_unit"] is None and r["sea_per_unit"] is None:
+            continue
+        per_sku[r["sku"]].append(r)
+
     out = {}
-    with get_db() as conn:
-        for r in conn.execute(sql, (region, region, region)).fetchall():
-            d = dict(r)
-            d["avg_total"] = (d["avg_dom"] or 0) + (d["avg_sea"] or 0)
-            out[_u(d["sku"])] = d
+    for sku, rs in per_sku.items():
+        doms = [r["dom_per_unit"] for r in rs if r["dom_per_unit"] is not None]
+        seas = [r["sea_per_unit"] for r in rs if r["sea_per_unit"] is not None]
+        totals = [
+            (r["dom_per_unit"] or 0) + (r["sea_per_unit"] or 0) for r in rs
+        ]
+        avg_dom = sum(doms) / len(doms) if doms else 0.0
+        avg_sea = sum(seas) / len(seas) if seas else 0.0
+        out[sku] = {
+            "sku": sku,
+            "avg_dom": avg_dom,
+            "avg_sea": avg_sea,
+            "avg_total": avg_dom + avg_sea,
+            "n_shipments": len(rs),
+            "total_qty": sum(r["qty"] for r in rs),
+            "min_total": min(totals) if totals else None,
+            "max_total": max(totals) if totals else None,
+        }
     return out
 
 
 def get_freight_per_shipment_series(region=REGION_US):
-    """
-    Per-shipment $/unit time series per SKU (for trend charts):
-    [{sku, shipment_id, ship_date, dom_per_unit, sea_per_unit}]
-    """
-    sql = """
-        SELECT l.sku, l.shipment_id, s.ship_date,
-               s.dom_total * 1.0 / q.total_qty AS dom_per_unit,
-               s.sea_total * 1.0 / q.total_qty AS sea_per_unit
-        FROM cost_shipment_lines l
-        JOIN cost_shipments s ON s.shipment_id = l.shipment_id AND s.region = l.region
-        JOIN (
-            SELECT shipment_id, SUM(qty) AS total_qty
-            FROM cost_shipment_lines WHERE region = ?
-            GROUP BY shipment_id HAVING SUM(qty) > 0
-        ) q ON q.shipment_id = l.shipment_id
-        WHERE l.region = ?
-        ORDER BY s.ship_date, l.shipment_id
-    """
-    with get_db() as conn:
-        return [dict(r) for r in conn.execute(sql, (region, region)).fetchall()]
+    """Per-shipment $/unit time series per SKU (for trend charts)."""
+    return _freight_line_rates(region)
 
 
 # ===========================================================================
@@ -528,6 +576,75 @@ def get_lastmile_averages(region=REGION_US, start_date=None, end_date=None):
     return singles, pooled
 
 
+def get_withbag_sums(region=REGION_US, start_date=None, end_date=None):
+    """
+    Last-mile cost sums for type-B "product + packaging bag" orders,
+    keyed by the product SKU (the non-bag SKU). Returned as sums so the
+    caller can pool across old/new SKU variants:
+        {UPPER_SKU: {"sum": float, "n": int}}
+    """
+    where = "WHERE region = ? AND order_type = 'B' AND sku_key LIKE ?"
+    params = [region, f"%{BAG_SKU}%"]
+    if start_date:
+        where += " AND ship_date >= ?"
+        params.append(start_date)
+    if end_date:
+        where += " AND ship_date <= ?"
+        params.append(end_date)
+    out = defaultdict(lambda: {"sum": 0.0, "n": 0})
+    with get_db() as conn:
+        for r in conn.execute(
+            f"SELECT sku_key, shipping_cost FROM cost_lastmile_orders {where}",
+            params,
+        ).fetchall():
+            for sku in (r["sku_key"] or "").split(";"):
+                if sku and sku != BAG_SKU:
+                    out[sku]["sum"] += r["shipping_cost"] or 0
+                    out[sku]["n"] += 1
+    return dict(out)
+
+
+COVER_COLOR_TOKENS = ["ICE", "NEWYELLOW", "NEWBLUE", "NEWPINK"]
+
+
+def _coverpair_token(sku_key):
+    """Color token for a large+small cover-pair order, else None."""
+    if "LARGECOVER" not in sku_key or "SMALLCOVER" not in sku_key:
+        return None
+    for tok in COVER_COLOR_TOKENS:
+        if tok in sku_key:
+            return tok
+    return None
+
+
+def get_coverpair_averages(region=REGION_US, start_date=None, end_date=None):
+    """
+    Average last-mile cost per cover-pair color (large + small pillow cover
+    shipped together). Replicates the Excel's bundle-name lookups for the
+    'Blissful Bundle Covers <color>' / Ice combo cover rows.
+
+    Returns {color_token: avg_cost}, e.g. {"ICE": 6.46, "NEWYELLOW": 5.53}.
+    """
+    where = "WHERE region = ? AND sku_key LIKE '%LARGECOVER%' AND sku_key LIKE '%SMALLCOVER%'"
+    params = [region]
+    if start_date:
+        where += " AND ship_date >= ?"
+        params.append(start_date)
+    if end_date:
+        where += " AND ship_date <= ?"
+        params.append(end_date)
+    sums = defaultdict(lambda: [0.0, 0])
+    with get_db() as conn:
+        for r in conn.execute(
+            f"SELECT sku_key, shipping_cost FROM cost_lastmile_orders {where}", params,
+        ).fetchall():
+            tok = _coverpair_token(r["sku_key"] or "")
+            if tok:
+                sums[tok][0] += r["shipping_cost"] or 0
+                sums[tok][1] += 1
+    return {tok: (s / n if n else None) for tok, (s, n) in sums.items()}
+
+
 def get_lastmile_monthly(region=REGION_US, main_sku=None, order_type=None):
     """Monthly avg last-mile cost time series (for trend charts)."""
     sql = """
@@ -583,27 +700,22 @@ def assemble_cost_table(region=REGION_US, lastmile_start=None, lastmile_end=None
     unload_rate = float(get_setting("cost_us_unload_rate_per_cbm", "6.2"))
     default_days = int(float(get_setting("cost_us_default_storage_days", "90")))
     singles, pooled = get_lastmile_averages(region, lastmile_start, lastmile_end)
+    coverpairs = get_coverpair_averages(region, lastmile_start, lastmile_end)
+    withbag = get_withbag_sums(region, lastmile_start, lastmile_end)
 
-    def _spec_for(p):
-        for key in (p["china_sku1"], p["china_sku2"]):
-            k = _u(key)
-            if k and k in specs:
-                return specs[k]
-        return None
-
-    def _freight_for(p):
-        for key in (p["china_sku1"], p["china_sku2"]):
-            k = _u(key)
-            if k and k in freight:
-                return freight[k]
-        return None
+    # Each component falls back sku1 → sku2 INDEPENDENTLY, exactly like the
+    # Excel's per-column IFERROR(VLOOKUP(sku1), VLOOKUP(sku2)) chains —
+    # a SKU can be in the freight data but not the rent table, etc.
+    def _candidates(p):
+        return [k for k in (_u(p["china_sku1"]), _u(p["china_sku2"])) if k]
 
     out = []
     for p in products:
         missing = []
+        cands = _candidates(p)
 
         # --- freight (domestic + sea) ---
-        fr = _freight_for(p)
+        fr = next((freight[k] for k in cands if k in freight), None)
         if p["domestic_override"] is not None:
             domestic = p["domestic_override"]
         elif fr:
@@ -619,31 +731,41 @@ def assemble_cost_table(region=REGION_US, lastmile_start=None, lastmile_end=None
             sea = 0.0
             missing.append("sea")
 
-        # --- warehouse rent ---
-        spec = _spec_for(p)
+        # --- warehouse rent (only SKUs present in the rent table) ---
         if p["rent_override"] is not None:
             rent = p["rent_override"]
-        elif spec:
-            cbm = spec["rent_unit_cbm"] or spec["unit_cbm"]
-            days = spec["assumed_storage_days"] or default_days
-            rent = compute_rent_per_unit(cbm, days, brackets) if cbm else None
-            if rent is None:
+        else:
+            rent_spec = next(
+                (specs[k] for k in cands if k in specs and specs[k]["in_rent_table"]),
+                None,
+            )
+            if rent_spec:
+                cbm = rent_spec["rent_unit_cbm"] or rent_spec["unit_cbm"]
+                days = rent_spec["assumed_storage_days"] or default_days
+                rent = compute_rent_per_unit(cbm, days, brackets) if cbm else 0.0
+            else:
                 rent = 0.0
                 missing.append("rent")
-        else:
-            rent = 0.0
-            missing.append("rent")
 
-        # --- inbound ---
+        # --- inbound (only SKUs present in the SKU Master) ---
         if p["inbound_override"] is not None:
             inbound = p["inbound_override"]
-        elif spec and spec["unit_cbm"] is not None and spec["unit_weight_kg"] is not None:
-            inbound = compute_inbound_per_unit(
-                spec["unit_weight_kg"], spec["unit_cbm"], rate_card, unload_rate,
-            )
         else:
-            inbound = 0.0
-            missing.append("inbound")
+            inb_spec = next(
+                (specs[k] for k in cands
+                 if k in specs and specs[k]["in_sku_master"]
+                 and specs[k]["unit_cbm"] is not None
+                 and specs[k]["unit_weight_kg"] is not None),
+                None,
+            )
+            if inb_spec:
+                inbound = compute_inbound_per_unit(
+                    inb_spec["unit_weight_kg"], inb_spec["unit_cbm"],
+                    rate_card, unload_rate,
+                )
+            else:
+                inbound = 0.0
+                missing.append("inbound")
 
         # --- last-mile ---
         if p["lastmile_override"] is not None:
@@ -653,13 +775,25 @@ def assemble_cost_table(region=REGION_US, lastmile_start=None, lastmile_end=None
             if lastmile is None:
                 lastmile = 0.0
                 missing.append("lastmile")
+        elif p["lastmile_group"].startswith("COVERPAIR:"):
+            lastmile = coverpairs.get(p["lastmile_group"].split(":", 1)[1])
+            if lastmile is None:
+                lastmile = 0.0
+                missing.append("lastmile")
+        elif p["lastmile_group"] == "WITHBAG":
+            # Product ships with the packaging bag (leggings): pool the
+            # type-B order costs across the product's old/new SKU variants.
+            tot = sum(withbag[k]["sum"] for k in cands if k in withbag)
+            n = sum(withbag[k]["n"] for k in cands if k in withbag)
+            if n:
+                lastmile = tot / n
+            else:
+                lastmile = 0.0
+                missing.append("lastmile")
         else:
-            lm = None
-            for key in (p["china_sku1"], p["china_sku2"]):
-                k = _u(key)
-                if k and k in singles:
-                    lm = singles[k]["avg_cost"]
-                    break
+            lm = next(
+                (singles[k]["avg_cost"] for k in cands if k in singles), None,
+            )
             if lm is None:
                 lm = 0.0
                 missing.append("lastmile")
