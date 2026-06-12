@@ -22,7 +22,7 @@ from core.costs import (
     get_sku_specs, update_sku_spec, get_rent_brackets, get_rate_card,
     replace_rent_brackets, replace_rate_card,
     get_cost_products, update_cost_product,
-    get_margin_revenue,
+    get_margin_revenue, get_actual_rent_per_unit,
     compute_rent_per_unit, compute_inbound_per_unit,
     REGION_US,
 )
@@ -120,10 +120,6 @@ COMPONENTS = [
     ("pink_box", "Pink Box"),
     ("other_box", "Other Box"),
 ]
-VARIABLE_COMPONENTS = [
-    "domestic_freight", "sea_freight", "warehouse_rent",
-    "inbound", "local_shipping",
-]
 
 
 def _fmt_money(v):
@@ -198,6 +194,8 @@ def _frag_summary():
             "Pick&Pack": r["pick_pack"],
             "Pink Box": r["pink_box"],
             "Other Box": r["other_box"],
+            "Fixed": r["fixed_cost"],
+            "Variable": r["variable_cost"],
             "TOTAL": r["total_cost"],
             "LANDED": r["landed_cost"],
         })
@@ -214,27 +212,48 @@ def _frag_summary():
         "**LANDED** = product + domestic + sea + inbound + pink box (cost to "
         "land in the US warehouse). **TOTAL** adds agent fee, rent, last-mile "
         "shipping, pick & pack and other packaging — the all-in cost to reach "
-        "the customer."
+        "the customer. **Fixed** = costs that only change when edited "
+        "(product, agent fee, pick & pack, boxes). **Variable** = costs that "
+        "move with new data (freight, rent, inbound, last-mile)."
     )
 
     # Stacked component chart
     st.markdown("#### Cost composition")
-    top_n = st.slider("Products to chart (by total cost)", 5, 40, 15, 5, key="cs_topn")
+    cc1, cc2 = st.columns([2, 2])
+    with cc1:
+        top_n = st.slider("Products to chart (by total cost)", 5, 40, 15, 5, key="cs_topn")
+    with cc2:
+        chart_mode = st.radio(
+            "Group by", ["10 components", "Fixed vs Variable"],
+            horizontal=True, key="cs_chart_mode",
+        )
     chart_rows = sorted(rows, key=lambda r: -r["total_cost"])[:top_n]
     if chart_rows:
         recs = []
         for r in chart_rows:
             label = (r["product_name"] or r["display_sku"])[:38]
-            for key, name in COMPONENTS:
-                recs.append({"Product": label, "Component": name, "$/unit": r[key]})
+            if chart_mode == "Fixed vs Variable":
+                recs.append({"Product": label, "Component": "🔒 Fixed", "$/unit": r["fixed_cost"]})
+                recs.append({"Product": label, "Component": "📈 Variable", "$/unit": r["variable_cost"]})
+            else:
+                for key, name in COMPONENTS:
+                    recs.append({"Product": label, "Component": name, "$/unit": r[key]})
         cdf = pd.DataFrame(recs)
+        comp_order = (
+            ["🔒 Fixed", "📈 Variable"] if chart_mode == "Fixed vs Variable"
+            else [n for _, n in COMPONENTS]
+        )
         fig = px.bar(
             cdf, x="$/unit", y="Product", color="Component", orientation="h",
-            title=f"Cost components — top {len(chart_rows)} products by total cost",
+            title=f"Cost composition — top {len(chart_rows)} products by total cost",
             category_orders={
                 "Product": [(r["product_name"] or r["display_sku"])[:38] for r in chart_rows],
-                "Component": [n for _, n in COMPONENTS],
+                "Component": comp_order,
             },
+            color_discrete_map=(
+                {"🔒 Fixed": "#1E40AF", "📈 Variable": "#DC2626"}
+                if chart_mode == "Fixed vs Variable" else None
+            ),
         )
         fig.update_layout(height=max(420, 32 * len(chart_rows) + 120),
                           yaxis_autorange="reversed")
@@ -667,32 +686,90 @@ def _frag_rent_inbound():
     brackets = get_rent_brackets(REGION_US)
     rate_card = get_rate_card(REGION_US)
     unload = float(get_setting("cost_us_unload_rate_per_cbm", "6.2"))
+    rent_method = get_setting("cost_us_rent_method", "assumed")
+    rent_window = int(float(get_setting("cost_us_rent_window_months", "3")))
 
     st.caption(
-        "**Rent $/unit** = unit CBM × Σ(days in age bracket × bracket rate) "
-        "over the SKU's assumed storage days. "
+        "**Assumed rent $/unit** = unit CBM × Σ(days in age bracket × rate) "
+        "over assumed storage days. "
+        "**Actual rent $/unit** = rent the 3PL actually billed for the SKU "
+        f"over the last {rent_window} months of rent data ÷ units shipped "
+        "(from the dropship uploads). "
         "**Inbound $/unit** = weight-tier op fee + unit CBM × "
         f"${unload:.2f}/CBM unload rate."
     )
 
+    # ── Rent method picker ─────────────────────────────────────────────
+    mp1, mp2, mp3 = st.columns([2, 1, 1])
+    with mp1:
+        sel_method = st.radio(
+            "Official rent method (feeds Total / Landed cost)",
+            options=["assumed", "actual"],
+            format_func=lambda m: (
+                "📐 Assumed (CBM × days × rates)" if m == "assumed"
+                else "🧾 Actual billed (falls back to assumed if no history)"
+            ),
+            index=0 if rent_method == "assumed" else 1,
+            horizontal=True,
+            key="ri_method",
+        )
+    with mp2:
+        sel_window = st.number_input(
+            "Window (months)", min_value=1, max_value=12,
+            value=rent_window, key="ri_window",
+        )
+    with mp3:
+        st.write("")
+        if st.button("💾 Apply", key="ri_method_save"):
+            set_setting("cost_us_rent_method", sel_method)
+            set_setting("cost_us_rent_window_months", int(sel_window))
+            take_snapshot(REGION_US, reason="rates")
+            _clear_caches()
+            st.success("Rent method updated — costs recomputed, snapshot taken.")
+            st.rerun(scope="fragment")
+
+    actual = get_actual_rent_per_unit(REGION_US, rent_window)
+    if not actual:
+        st.info(
+            "No actual rent data yet — upload a storage rent export "
+            "(仓租费) via **Data Management → Product Costs** to see "
+            "actual vs assumed side by side."
+        )
+
     rows = []
     for s in specs:
-        rent = None
+        rent_assumed = None
         if s["in_rent_table"]:
             cbm = s["rent_unit_cbm"] or s["unit_cbm"]
-            rent = compute_rent_per_unit(cbm, s["assumed_storage_days"], brackets) if cbm else None
+            rent_assumed = compute_rent_per_unit(
+                cbm, s["assumed_storage_days"], brackets,
+            ) if cbm else None
+        a = actual.get(s["sku"])
+        rent_actual = a["per_unit"] if a else None
         inbound = None
         if s["in_sku_master"] and s["unit_cbm"] is not None and s["unit_weight_kg"] is not None:
             inbound = compute_inbound_per_unit(
                 s["unit_weight_kg"], s["unit_cbm"], rate_card, unload,
             )
+        official = None
+        if rent_method == "actual" and rent_actual is not None:
+            official = "🧾 actual"
+        elif rent_assumed is not None:
+            official = "📐 assumed"
         rows.append({
             "SKU": s["sku"],
             "Unit CBM": s["unit_cbm"],
             "Unit Wt (kg)": s["unit_weight_kg"],
-            "Rent CBM": s["rent_unit_cbm"],
             "Storage days": s["assumed_storage_days"],
-            "Rent $/u": rent,
+            "Assumed $/u": rent_assumed,
+            "Actual $/u": rent_actual,
+            "Δ Actual−Assumed": (
+                rent_actual - rent_assumed
+                if rent_actual is not None and rent_assumed is not None else None
+            ),
+            "Official": official or "—",
+            "Rent billed": a["rent_billed"] if a else None,
+            "Units shipped": a["units_shipped"] if a else None,
             "Inbound $/u": inbound,
         })
     df = pd.DataFrame(rows)
@@ -702,10 +779,39 @@ def _frag_rent_inbound():
     st.dataframe(
         df, use_container_width=True, hide_index=True, height=440,
         column_config={
-            "Rent $/u": st.column_config.NumberColumn(format="$%.4f"),
+            "Assumed $/u": st.column_config.NumberColumn(format="$%.4f"),
+            "Actual $/u": st.column_config.NumberColumn(format="$%.4f"),
+            "Δ Actual−Assumed": st.column_config.NumberColumn(format="$%.4f"),
+            "Rent billed": st.column_config.NumberColumn(format="$%.2f"),
             "Inbound $/u": st.column_config.NumberColumn(format="$%.4f"),
         },
     )
+
+    # Comparison chart: SKUs with both values
+    both = [
+        r for r in rows
+        if r["Assumed $/u"] is not None and r["Actual $/u"] is not None
+    ]
+    if both:
+        both.sort(key=lambda r: -(r["Actual $/u"] or 0))
+        cdf = pd.DataFrame([
+            {"SKU": r["SKU"], "Method": "📐 Assumed", "$/unit": r["Assumed $/u"]}
+            for r in both[:20]
+        ] + [
+            {"SKU": r["SKU"], "Method": "🧾 Actual", "$/unit": r["Actual $/u"]}
+            for r in both[:20]
+        ])
+        fig = px.bar(
+            cdf, x="$/unit", y="SKU", color="Method", barmode="group",
+            orientation="h",
+            title=f"Assumed vs actual rent $/unit — top {min(len(both), 20)} SKUs by actual",
+            color_discrete_map={"📐 Assumed": "#1E40AF", "🧾 Actual": "#DC2626"},
+        )
+        fig.update_layout(
+            height=max(420, 34 * min(len(both), 20) + 120),
+            yaxis_autorange="reversed",
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
     rc1, rc2 = st.columns(2)
     with rc1:
