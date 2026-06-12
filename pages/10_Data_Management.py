@@ -175,7 +175,7 @@ st.markdown("""
 # ---------------------------------------------------------------------------
 (
     tab_shopify, tab_dropship, tab_payments, tab_discovery, tab_erp,
-    tab_arrivals, tab_transfers, tab_settings, tab_danger,
+    tab_arrivals, tab_transfers, tab_costs, tab_settings, tab_danger,
 ) = st.tabs([
     "Shopify Sync",
     "Dropship Upload",
@@ -184,6 +184,7 @@ st.markdown("""
     "ERP Upload",
     "Production Arrivals",
     "Warehouse Transfers",
+    "Product Costs",
     "Settings",
     "Clear Data",
 ])
@@ -1383,6 +1384,196 @@ with tab_transfers:
         st.markdown("</div>", unsafe_allow_html=True)
     else:
         st.info("No warehouse transfers recorded yet. Use the form above to add one.")
+
+# ─── Product Costs ────────────────────────────────────────────────────────
+with tab_costs:
+    st.markdown("""
+    <div class="dm-section">
+        <div class="dm-section-title">Product Cost Data</div>
+        <div class="dm-section-desc">
+            Two uploads live here:<br>
+            <b>1. One-time seed</b> — upload the full "📦 Product Cost 2026.xlsx"
+            workbook to migrate all cost data (manual costs, freight shipments,
+            specs, rate tables, last-mile history) into the dashboard.<br>
+            <b>2. Recurring 3PL billing</b> — upload the raw 原始数据 billing
+            export monthly; last-mile shipping averages recompute automatically.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    from core.cost_import import seed_from_workbook, parity_check
+    from core.costs import (
+        classify_billing_export, insert_lastmile_orders_bulk,
+        delete_lastmile_in_range, take_snapshot, get_lastmile_summary,
+    )
+
+    # ── 1. One-time workbook seed ──────────────────────────────────────
+    st.markdown("#### 🌱 Seed from cost workbook")
+    _last_seed = get_last_sync("cost_seed")
+    if _last_seed:
+        st.info(
+            f"📅 **Last seed:** {_last_seed['completed_at']} — "
+            f"{_last_seed.get('records_synced', 0):,} products"
+        )
+
+    seed_file = st.file_uploader(
+        "Upload the full Product Cost workbook (.xlsx)",
+        type=["xlsx"],
+        key="cost_seed_upload",
+        help="The complete 📦 Product Cost 2026.xlsx with US sheet, "
+             "Shipment Data, SKU Master, Classification, etc.",
+    )
+    if seed_file:
+        st.warning(
+            "Seeding **replaces ALL existing product-cost data** "
+            "(products, specs, shipments, rate tables, last-mile history). "
+            "Cost snapshots are kept."
+        )
+        _confirm_seed = st.checkbox(
+            "I understand — replace all cost data with this workbook",
+            key="cost_seed_confirm",
+        )
+        if st.button(
+            "Seed Cost Data", type="primary",
+            disabled=not _confirm_seed, key="cost_seed_btn",
+        ):
+            _bytes = seed_file.getvalue()
+            with st.status("Seeding cost data from workbook…", expanded=True) as _status:
+                _msgs = st.empty()
+                stats = seed_from_workbook(_bytes, progress=lambda m: st.write(m))
+                _status.update(
+                    label=(
+                        f"✅ Seeded {stats['products']} products, "
+                        f"{stats['shipments']} shipments, "
+                        f"{stats['lastmile_orders']:,} last-mile orders"
+                    ),
+                    state="complete", expanded=False,
+                )
+            log_sync("cost_seed", "success", stats["products"])
+            if stats["warnings"]:
+                with st.expander(f"⚠️ {len(stats['warnings'])} parse warnings"):
+                    for w in stats["warnings"]:
+                        st.write(f"- {w}")
+
+            # Parity check: computed vs the workbook's own numbers
+            with st.spinner("Running parity check against the workbook…"):
+                diffs, matched = parity_check(_bytes)
+            errors = [d for d in diffs if d["kind"] == "error"]
+            method = [d for d in diffs if d["kind"] == "method"]
+            if errors:
+                st.error(
+                    f"Parity: {matched} rows match, **{len(errors)} rows "
+                    f"DIFFER unexpectedly** (+{len(method)} known method deviations)"
+                )
+                st.dataframe(pd.DataFrame(errors), use_container_width=True, hide_index=True)
+            else:
+                st.success(
+                    f"Parity: **{matched} rows match the workbook within $0.01** · "
+                    f"{len(method)} rows differ only by documented method "
+                    f"improvements (bundle last-mile pooling, rent CBM fallback)."
+                )
+            if method:
+                with st.expander(f"View {len(method)} method deviations"):
+                    st.dataframe(pd.DataFrame(method), use_container_width=True, hide_index=True)
+            st.cache_data.clear()
+            st.balloons()
+
+    st.markdown("---")
+
+    # ── 2. Recurring 3PL billing upload ────────────────────────────────
+    st.markdown("#### 🚚 3PL billing upload (last-mile shipping)")
+    _lm = get_lastmile_summary()
+    if _lm.get("n"):
+        st.info(
+            f"📦 Last-mile history: **{_lm['n']:,} orders** from "
+            f"**{_lm['first_date']}** to **{_lm['last_date']}** "
+            f"({_lm.get('n_other') or 0} unclassified)"
+        )
+
+    bill_file = st.file_uploader(
+        "Upload raw 3PL billing export (原始数据)",
+        type=["xlsx", "xls"],
+        key="cost_billing_upload",
+        help="The raw billing export with 出库时间, 业务单号, SKU, SKU数量, "
+             "应收金额, 目的地国家 columns. Existing orders in the file's "
+             "date range are replaced.",
+    )
+    if bill_file:
+        try:
+            bl_df = pd.read_excel(bill_file)
+            _required = ["出库时间", "业务单号", "SKU", "SKU数量", "应收金额"]
+            _missing = [c for c in _required if c not in bl_df.columns]
+            if _missing:
+                st.error(f"Missing required columns: {', '.join(_missing)}")
+                st.stop()
+
+            line_rows = []
+            for _, r in bl_df.iterrows():
+                ship = r.get("出库时间")
+                ship_date = None
+                if pd.notna(ship):
+                    try:
+                        ship_date = pd.to_datetime(ship).date().isoformat()
+                    except Exception:
+                        ship_date = None
+                amt = r.get("应收金额")
+                line_rows.append({
+                    "order_id": str(r.get("业务单号") or "").strip() or None,
+                    "ship_date": ship_date,
+                    "country": str(r.get("目的地国家") or "").strip() or None,
+                    "sku": str(r.get("SKU") or "").strip() or None,
+                    "qty": r.get("SKU数量") if pd.notna(r.get("SKU数量")) else 0,
+                    "amount": float(amt) if pd.notna(amt) else 0.0,
+                    "has_reversal": str(r.get("有红冲单") or "").strip() == "是",
+                    "cross_month_rebill": str(r.get("是否跨月重计") or "").strip() == "是",
+                })
+
+            orders, cstats = classify_billing_export(line_rows)
+            if not orders:
+                st.error("No valid orders found in the file.")
+                st.stop()
+
+            dates = [o["ship_date"] for o in orders]
+            _min_d, _max_d = min(dates), max(dates)
+            _tc = cstats["type_counts"]
+            st.success(
+                f"Parsed **{cstats['lines_in']:,} fee lines** → "
+                f"**{len(orders):,} orders** from {_min_d} to {_max_d}"
+            )
+            st.caption(
+                f"Singles (A): {_tc.get('A', 0):,} · Bundle+bag (B): {_tc.get('B', 0):,} · "
+                f"Cozy (C): {_tc.get('C', 0):,} · Other: {_tc.get('OTHER', 0):,} · "
+                f"Skipped lines: {cstats['skipped_reversal']} reversal/rebill, "
+                f"{cstats['skipped_no_date']} no-date"
+            )
+            st.warning(
+                f"Importing will **replace** last-mile orders shipped between "
+                f"**{_min_d}** and **{_max_d}**, then take a cost snapshot."
+            )
+
+            if st.button("Import Billing Data", type="primary", key="import_billing"):
+                with st.status(f"Importing {len(orders):,} orders…", expanded=True) as _status:
+                    st.write(f"🗑️ Deleting existing orders in {_min_d} → {_max_d}…")
+                    delete_lastmile_in_range(_min_d, _max_d)
+                    st.write(f"📥 Inserting {len(orders):,} classified orders…")
+                    n = insert_lastmile_orders_bulk(orders)
+                    st.write("📸 Taking cost snapshot…")
+                    snap_n = take_snapshot(reason="upload_lastmile")
+                    _status.update(
+                        label=f"✅ Imported {n:,} orders · snapshot of {snap_n} products",
+                        state="complete", expanded=False,
+                    )
+                log_sync("cost_billing_upload", "success", n)
+                st.cache_data.clear()
+                st.success(
+                    f"### ✅ Billing import complete\n\n"
+                    f"**{n:,}** orders imported covering **{_min_d}** → **{_max_d}**. "
+                    f"Last-mile averages and the cost table have been refreshed."
+                )
+                st.balloons()
+        except Exception as e:
+            st.error(f"Error reading file: {e}")
+
 
 # ─── Settings ─────────────────────────────────────────────────────────────
 with tab_settings:

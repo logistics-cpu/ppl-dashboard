@@ -928,6 +928,33 @@ def get_snapshot_dates(region=REGION_US):
 
 
 # ===========================================================================
+# Margin: revenue per Shopify SKU from synced orders
+# ===========================================================================
+
+def get_margin_revenue(start_date, end_date, country_code="US"):
+    """
+    Revenue + units per Shopify SKU from synced Shopify orders.
+    Returns {UPPER_SKU: {units, revenue}}.
+    """
+    sql = """
+        SELECT UPPER(oi.shopify_sku) AS sku,
+               SUM(oi.quantity) AS units,
+               SUM(oi.quantity * COALESCE(oi.unit_price, 0)) AS revenue
+        FROM order_items oi
+        JOIN orders o ON o.shopify_order_id = oi.shopify_order_id
+        WHERE o.created_at_local BETWEEN ? AND ?
+          AND o.ship_country_code = ?
+          AND oi.shopify_sku IS NOT NULL AND oi.shopify_sku != ''
+        GROUP BY UPPER(oi.shopify_sku)
+    """
+    out = {}
+    with get_db() as conn:
+        for r in conn.execute(sql, (start_date, end_date, country_code)).fetchall():
+            out[r["sku"]] = {"units": r["units"], "revenue": r["revenue"]}
+    return out
+
+
+# ===========================================================================
 # 3PL billing export classifier (recurring upload)
 # ===========================================================================
 
